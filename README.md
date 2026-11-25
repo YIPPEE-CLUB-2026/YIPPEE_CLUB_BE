@@ -80,7 +80,12 @@ Java 17, Spring Boot 4.1, MySQL 8, Flyway.
   채우기 전에는 가입(인증 메일), 비밀번호 재설정 메일(500), 유료 주문이 되지 않습니다. 고친 뒤 `sudo systemctl restart yippee`.
 - **새 버전 올리기**: `./gradlew bootJar`로 만든 jar를 서버로 복사해
   `sudo install -o yippee -g yippee -m 640 app.jar /opt/yippee/app.jar && sudo systemctl restart yippee`.
-  PDF와 표지는 `/data/yippee-files`에 있어 jar를 바꿔도 남습니다. 백업은 아직 걸어 두지 않았습니다.
+  PDF와 표지는 `/data/yippee-files`에 있어 jar를 바꿔도 남습니다. **백업(2026-11-25부터)**: 두 겹입니다.
+  ① 서버 안에서 매일 03:15(KST)에 DB 전체와 파일 폴더를 `/var/backups/yippee`에 떠서 7일치를 둡니다([deploy/backup.sh](deploy/backup.sh)).
+  잘못된 스키마 변경, 실수로 지운 데이터, 망가진 배포에서 되돌리는 용도입니다. 만든 날 임시 DB에 복원해 18개 테이블의 행 수가
+  원본과 같은 것을 확인했습니다. ② 디스크 전체를 AWS가 매일 스냅샷으로 뜨고 7일치를 둡니다(Data Lifecycle Manager 기본 정책).
+  서버나 디스크 자체가 사라졌을 때를 위한 것이고, ①의 덤프도 함께 담깁니다. 스냅샷에서 서버를 되살리는 것은 **해 보지 않았습니다.**
+  비용은 쓴 용량 기준이라 지금은 월 0.5달러 미만으로 추정합니다. 복원 명령은 `deploy/backup.sh` 머리말에 있습니다.
 - **MySQL에서 테스트 다시 돌리기**: 소스를 서버에 올리고 `/etc/yippee/test.env`의 세 값을 환경변수로 준 뒤 `./gradlew test`.
   테스트는 전용 DB(`yippee_club_test`)와 전용 계정을 써서 앱의 DB를 건드리지 않습니다. 1GB 서버라 테스트 JVM 힙을 지정해야 합니다(600MB로 돌렸습니다).
 - **스키마 변경**: `V1__init.sql`과 `V2__social_accounts_and_download_origin.sql`(2026-11-25)은 이 서버의 DB에 적용됐습니다.
