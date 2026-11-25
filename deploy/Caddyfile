@@ -1,0 +1,8 @@
+# HTTPS in front of the API. Copy to /etc/caddy/Caddyfile (apt install caddy), then: systemctl restart caddy
+# Caddy gets and renews the certificate by itself once the name points at this server and ports
+# 80 and 443 are open. The app must run with FORWARD_HEADERS_STRATEGY=native, or every client
+# looks like 127.0.0.1 to the request limits.
+api.yippeclub.com {
+	encode gzip
+	reverse_proxy 127.0.0.1:8080
+}
