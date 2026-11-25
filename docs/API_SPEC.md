@@ -9,7 +9,7 @@
   로그인이 필요한 API도 부를 수 있습니다(5분 뒤 만료). 그 화면에는 본문의 필드가 나오지 않으니 이 문서를 함께 봅니다.
 - 기존 팀 명세 `API_SPEC_v1.5`의 번호를 각 API 옆에 `v1.5 #번호`로 적었습니다. 번호가 없는 것은 이 서버에서 새로 생긴 API입니다.
 - **이 문서에 없는 v1.5의 API는 구현되어 있지 않습니다**(예: Apple 로그인, 프로필 사진 18~19, 홈 26, 검색어 29~35,
-  추천 36, 미리보기 38, 저장 카드 55~58, 쿠폰·캐시 59 이후). 호출하면 404이고, 토큰 없이 부르면 주소에 따라 401일 수 있습니다(1.2).
+  추천 36, 저장 카드 55~58, 쿠폰·캐시 59 이후). 호출하면 404이고, 토큰 없이 부르면 주소에 따라 401일 수 있습니다(1.2).
 
 ## 목차
 
@@ -147,6 +147,7 @@ Authorization: Bearer <access_token>
 | 37 | GET | `/activity-categories` | 없음 | 카테고리 목록 |
 | 27 | GET | `/activities` | 없음 | 활동지 목록·검색 |
 | 28 | GET | `/activities/{activity_id}` | 없음 | 활동지 상세 |
+| 38 | GET | `/activities/{activity_id}/preview` | 없음 | 구매 전 미리보기(샘플 이미지 주소) |
 | | GET | `/activities/{activity_id}/files/image`, `.../files/pdf` | 없음 | 표지·PDF 파일 |
 | 41 | GET | `/favorites` | 필요 | 찜 목록 |
 | 42 | POST | `/favorites` | 필요 | 찜 추가 |
@@ -566,6 +567,18 @@ Authorization: Bearer <access_token>
 
 PDF는 첨부 파일(`activity-{id}.pdf`)로 내려오고 브라우저에 보관되지 않습니다.
 
+### 6.5 구매 전 미리보기 `v1.5 #38`
+
+`GET /activities/{id}/preview` — 로그인 없이 호출합니다. 관리자가 올려 둔 샘플 이미지의 주소를 순서대로 줍니다.
+
+```json
+{ "preview_urls": ["https://.../api/v1/activities/31/previews/1?v=1795600000", "https://.../api/v1/activities/31/previews/2?v=1795600000"] }
+```
+
+- 샘플이 없으면 `preview_urls`는 빈 배열입니다. 최대 5장이고 PNG·JPEG·WEBP 이미지입니다.
+- 주소는 그대로 `<img src>`에 넣으면 됩니다. 샘플이 바뀌면 `?v=` 값이 바뀌므로 브라우저 캐시를 신경 쓸 필요가 없습니다.
+- 공개되지 않았거나 없는 활동지는 404입니다.
+
 ---
 
 ## 7. 찜과 장바구니
@@ -856,6 +869,8 @@ PDF는 첨부 파일(`activity-{id}.pdf`)로 내려오고 브라우저에 보관
 | `POST /admin/activities` | 폼 업로드(아래) | `201` 활동지 + `is_public` |
 | `PATCH /admin/activities/{id}` | JSON(아래 필드의 일부) | 활동지 + `is_public` |
 | `POST /admin/activities/{id}/files` | 폼 업로드: `image`, `pdf` 중 하나 이상 | 활동지 + `is_public` |
+| `POST /admin/activities/{id}/previews` | 폼 업로드: `previews` 이미지 1~5개(각 5MB 이하). 기존 샘플 전체를 이 순서로 교체 | `{ "preview_urls": [...] }` |
+| `DELETE /admin/activities/{id}/previews` | 없음 | 샘플을 모두 지움. `{ "preview_urls": [] }` |
 
 활동지 등록(`multipart/form-data`):
 

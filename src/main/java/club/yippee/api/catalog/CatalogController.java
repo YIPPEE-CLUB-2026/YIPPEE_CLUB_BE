@@ -118,6 +118,26 @@ public class CatalogController {
                 .body(file);
     }
 
+    /** Links to the sample pages of an activity on the catalogue. An empty list when it has none. */
+    @GetMapping("/api/v1/activities/{id:[0-9]+}/preview")
+    Map<String, Object> preview(@PathVariable String id) {
+        return activities.previews(visible(id));
+    }
+
+    @GetMapping("/api/v1/activities/{id:[0-9]+}/previews/{position:[1-9]}")
+    ResponseEntity<Resource> previewPage(@PathVariable String id, @PathVariable int position) throws IOException {
+        Resource file = activities.preview(visible(id), position);
+        if (file == null) {
+            throw ApiException.notFound();
+        }
+        // Public, and its address changes with the set, so a browser may keep it for a day.
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CACHE_CONTROL, "public, max-age=86400")
+                .header(HttpHeaders.CONTENT_DISPOSITION, "inline")
+                .contentType(TYPES.getOrDefault(Activities.extension(file), MediaType.APPLICATION_OCTET_STREAM))
+                .body(file);
+    }
+
     // Unpublished and missing look the same from outside.
     private Activity visible(String id) {
         Long number = id.length() <= 18 ? Long.valueOf(id) : null;

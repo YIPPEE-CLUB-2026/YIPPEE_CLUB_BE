@@ -112,6 +112,35 @@ public class AdminController {
                 imageBytes, imageExtension, pdfBytes));
     }
 
+    /**
+     * A form upload of one to five "previews" images: the sample pages shown before buying.
+     * They replace whatever was there, in the order sent.
+     */
+    @PostMapping(value = "/activities/{id:[0-9]{1,18}}/previews", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    Map<String, Object> replacePreviews(@PathVariable Long id,
+                                        @RequestParam(required = false) List<MultipartFile> previews) throws IOException {
+        List<byte[]> images = new java.util.ArrayList<>();
+        List<String> extensions = new java.util.ArrayList<>();
+        boolean sound = previews != null && !previews.isEmpty() && previews.size() <= Activities.MAX_PREVIEWS;
+        for (MultipartFile page : sound ? previews : List.<MultipartFile>of()) {
+            byte[] bytes = page.getSize() > MAX_IMAGE_BYTES ? null : page.getBytes();
+            String extension = imageExtension(bytes);
+            sound &= extension != null;
+            images.add(bytes);
+            extensions.add(extension);
+        }
+        if (!sound) {
+            throw ApiException.field("previews");
+        }
+        return activities.replacePreviews(id, images, extensions);
+    }
+
+    /** Takes the activity's sample pages away. */
+    @org.springframework.web.bind.annotation.DeleteMapping("/activities/{id:[0-9]{1,18}}/previews")
+    Map<String, Object> removePreviews(@PathVariable Long id) throws IOException {
+        return activities.replacePreviews(id, List.of(), List.of());
+    }
+
     /** A form upload with "image", "pdf" or both: replaces that file of an existing activity. */
     @PostMapping(value = "/activities/{id:[0-9]+}/files", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     Map<String, Object> replaceFiles(@PathVariable String id,
