@@ -103,6 +103,92 @@ public class AccountService {
         return body;
     }
 
+    /**
+     * Signs in whoever the provider named, making the account on the first visit. The provider's
+     * own user number names the account from then on; the email is used only that first time.
+     * A null agreements text means the consent a new account needs was not given.
+     */
+    @Transactional
+    public Map<String, Object> socialLogin(String provider, SocialGateway.Identity who, String agreements) {
+        Long linked = linkedUser(provider, who.id(), false);
+        User user = null;
+        boolean created = false;
+        if (linked != null) {
+            user = users.lockById(linked).orElseThrow();
+            // While we waited for the user's row, a password reset or the owner's vouched sign-in may
+            // have taken this door away. Looked at again under the lock, past our own snapshot.
+            if (linkedUser(provider, who.id(), true) == null) {
+                user = null;
+            }
+        }
+        if (user == null) {
+            if (who.email() == null) {
+                throw new ApiException(409, "EMAIL_REQUIRED", "이메일 제공에 동의해야 가입할 수 있습니다.");
+            }
+            refuseAdmin(who.email());
+            user = users.lockByEmail(who.email()).orElse(null);
+            if (user != null && !who.emailVerified()) {
+                // The provider does not vouch for this address, so it cannot open an account that has it.
+                throw new ApiException(409, "ALREADY_EXISTS", "이미 가입한 이메일입니다. 이메일과 비밀번호로 로그인해 주세요.");
+            }
+            if (user != null) {
+                // The address is proven to be this person's. Doors opened on it without proof may be
+                // somebody else's: they go, and so does every session, before this one starts.
+                removeUnprovenLinks(user);
+            }
+            if (user == null) {
+                if (agreements == null) {
+                    throw new ApiException(409, "AGREEMENTS_REQUIRED", "약관에 동의한 뒤 다시 시도해 주세요.");
+                }
+                // A password nobody knows: the account opens through the provider, or after a password reset.
+                user = users.saveAndFlush(new User(who.email(), encoder.encode(Digests.randomToken()), agreements));
+                created = true;
+            }
+            jdbc.sql("insert into social_accounts (user_id, provider, provider_user_id, email_verified, created_at)"
+                            + " values (?, ?, ?, ?, ?)")
+                    .params(user.id, provider, who.id(), who.emailVerified(),
+                            java.time.LocalDateTime.now(java.time.ZoneOffset.UTC)).update();
+        }
+        // Also for an account linked before its address was put on the admin list.
+        refuseAdmin(user.email);
+        if (!user.active) {
+            throw new ApiException(403, "PERMISSION_DENIED", "이용할 수 없는 계정입니다.");
+        }
+        user.lastLoginAt = Instant.now();
+        Map<String, Object> body = tokens.issue(user);
+        body.put("is_new_user", created);
+        body.put("user", view(user));
+        return body;
+    }
+
+    // Whose account this provider number opens, or null. The number is compared to the letter here:
+    // the database's own comparison may ignore case, and Naver's numbers are mixed-case text.
+    private Long linkedUser(String provider, String id, boolean underLock) {
+        return jdbc.sql("select user_id, provider_user_id from social_accounts where provider = ? and provider_user_id = ?"
+                        + (underLock ? " for update" : ""))
+                .params(provider, id)
+                .query((row, index) -> id.equals(row.getString("provider_user_id")) ? row.getLong("user_id") : null)
+                .list().stream().filter(java.util.Objects::nonNull).findFirst().orElse(null);
+    }
+
+    // Called once the mailbox is proven (a password reset, a vouched sign-in). If a door goes, the
+    // sessions opened through it go too: every session ends and every access token stops working.
+    private void removeUnprovenLinks(User user) {
+        int removed = jdbc.sql("delete from social_accounts where user_id = ? and email_verified = false")
+                .param(user.id).update();
+        if (removed > 0) {
+            user.tokenVersion++;
+            sessions.revokeAll(user.id, Instant.now());
+        }
+    }
+
+    // Admin is decided by email, so a provider's word about an email must never be a second way in.
+    private void refuseAdmin(String email) {
+        if (properties.adminEmails().contains(email)) {
+            throw new ApiException(403, "PERMISSION_DENIED", "이 계정은 이메일과 비밀번호로만 로그인할 수 있습니다.");
+        }
+    }
+
     /** A new access token for a live session. The refresh token itself is not rotated. */
     @Transactional
     public Map<String, Object> refresh(String refreshToken) {
@@ -211,7 +297,11 @@ public class AccountService {
 
     @Transactional
     public void confirmPasswordReset(String resetToken, String newPassword) {
-        setPassword(resetOwner(resetToken), newPassword);
+        User user = resetOwner(resetToken);
+        setPassword(user, newPassword);
+        // Whoever resets has the mailbox. A sign-in door opened on an address its provider did not
+        // vouch for may be somebody else's, so it goes; the owner signs in with the new password.
+        removeUnprovenLinks(user);
     }
 
     private User resetOwner(String token) {
