@@ -1,0 +1,38 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      # A throwaway database that lives only for this run. Its password is not a secret.
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: ci-only-password
+          MYSQL_DATABASE: test_yippee
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -pci-only-password"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+      - name: Tests on H2
+        run: sh ./gradlew test
+      # The same tests again on real MySQL. This is the run that proves the row locks on the
+      # money path and the migration; H2 cannot.
+      - name: Tests on MySQL
+        run: sh ./gradlew test --rerun-tasks
+        env:
+          TEST_DATABASE_URL: jdbc:mysql://127.0.0.1:3306/test_yippee?characterEncoding=UTF-8&connectionTimeZone=UTC
+          TEST_DATABASE_USER: root
+          TEST_DATABASE_PASSWORD: ci-only-password
