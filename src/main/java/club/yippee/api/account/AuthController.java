@@ -6,6 +6,7 @@ import java.util.regex.Pattern;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -38,8 +39,11 @@ public class AuthController {
     private final JsonMapper json;
     private final AppProperties.Auth auth;
 
+    private final SocialGateway social;
+
     AuthController(AccountService accounts, VerificationService verification, PasswordPolicy policy,
-                   RateLimiter limiter, JsonMapper json, AppProperties properties) {
+                   RateLimiter limiter, JsonMapper json, AppProperties properties, SocialGateway social) {
+        this.social = social;
         this.accounts = accounts;
         this.verification = verification;
         this.policy = policy;
@@ -140,6 +144,49 @@ public class AuthController {
         fields.check();
         limiter.identityFrom(request, "login", email);
         return accounts.login(email, password);
+    }
+
+    /**
+     * Sign-in through Kakao, Naver or Google. The frontend sends the user to the provider, gets an
+     * authorization code back, and hands it here together with the redirect address it used.
+     * 201 with is_new_user true when the account was just made, 200 otherwise.
+     */
+    @PostMapping("/social/{provider}")
+    ResponseEntity<Map<String, Object>> social(@PathVariable String provider, @RequestBody(required = false) Object body,
+                                               HttpServletRequest request) {
+        if (!social.offers(provider)) {
+            throw ApiException.notFound();
+        }
+        // Each call makes us ask the provider with our own key.
+        limiter.address(request, "social");
+        Fields fields = Fields.strict(body, "authorization_code", "redirect_uri", "state", "agreements");
+        String code = fields.text("authorization_code", 2000, false);
+        // Kakao and Google exchange a code only with the redirect address it was issued for; Naver wants its state.
+        boolean naver = "naver".equals(provider);
+        String redirect = naver && !fields.has("redirect_uri") ? null : fields.text("redirect_uri", 500, false);
+        String state = naver || fields.has("state") ? fields.text("state", 500, false) : null;
+        // Consent counts only on the first visit, when the account is made. Not given in full, it is
+        // as if left out: someone who already has an account is not turned away for it.
+        String agreements = requiredAgreements.isEmpty() ? "{}" : null;
+        if (fields.has("agreements")) {
+            if (fields.raw("agreements") instanceof Map<?, ?> consent && json.writeValueAsString(consent).length() <= 4000) {
+                boolean full = requiredAgreements.stream().allMatch(required -> Boolean.TRUE.equals(consent.get(required)));
+                agreements = full ? json.writeValueAsString(consent) : null;
+            } else {
+                fields.reject("agreements");
+            }
+        }
+        fields.check();
+        SocialGateway.Identity who = social.identify(provider, code, redirect, state);
+        Map<String, Object> result;
+        try {
+            result = accounts.socialLogin(provider, who, agreements);
+        } catch (DataIntegrityViolationException | org.springframework.dao.ConcurrencyFailureException sameFirstVisitTwice) {
+            // Two first visits at once: the unique index (or the database, ending a deadlock) let one
+            // through, and this one now finds it.
+            result = accounts.socialLogin(provider, who, agreements);
+        }
+        return ResponseEntity.status(Boolean.TRUE.equals(result.get("is_new_user")) ? 201 : 200).body(result);
     }
 
     @PostMapping("/token/refresh")
