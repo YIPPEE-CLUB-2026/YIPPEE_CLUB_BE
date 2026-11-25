@@ -1,0 +1,21 @@
+# Tests run the same Flyway script on in-memory H2 in MySQL mode. MySQL itself is not exercised here.
+spring:
+  datasource:
+    # Set TEST_DATABASE_URL (and user, password) to run the very same tests on a real MySQL, as CI does.
+    url: ${TEST_DATABASE_URL:jdbc:h2:mem:test;MODE=MySQL;DATABASE_TO_LOWER=TRUE;CASE_INSENSITIVE_IDENTIFIERS=TRUE;DB_CLOSE_DELAY=-1}
+    username: ${TEST_DATABASE_USER:sa}
+    password: ${TEST_DATABASE_PASSWORD:}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+
+app:
+  secret: test-only-secret-0123456789-abcdefghijklmnopqrstuvwxyz
+  password-reset-frontend-url: https://frontend.example.com/password/reset
+  files-root: build/test-files
+  admin-emails: admin@example.com
+  cors-allowed-origins: http://localhost:3000
+  required-agreements: terms
+  auth:
+    ip-limit: 1000
+    email-limit: 1000

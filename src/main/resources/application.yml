@@ -1,0 +1,103 @@
+# Every value comes from the environment. The names match the Django server's .env.
+spring:
+  application:
+    name: yippee-club-be
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:yippee_club_db}?characterEncoding=UTF-8&connectionTimeZone=UTC
+    username: ${MYSQL_USER:}
+    password: ${MYSQL_PASSWORD:}
+    hikari:
+      # Keep (instances x this) under the database's max_connections.
+      maximum-pool-size: ${DB_POOL_SIZE:20}
+      # Under overload a request fails in 3 seconds instead of holding a server thread for 30.
+      connection-timeout: 3000
+      max-lifetime: 1500000
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 26MB
+  lifecycle:
+    # On a deploy, requests already running get this long to finish before the process exits.
+    timeout-per-shutdown-phase: 20s
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: none
+    properties:
+      hibernate.jdbc.time_zone: UTC
+      hibernate.type.preferred_instant_jdbc_type: TIMESTAMP
+  mail:
+    host: ${EMAIL_HOST:localhost}
+    port: ${EMAIL_PORT:587}
+    username: ${EMAIL_HOST_USER:}
+    password: ${EMAIL_HOST_PASSWORD:}
+    properties:
+      mail.smtp.auth: ${EMAIL_SMTP_AUTH:true}
+      mail.smtp.starttls.enable: ${EMAIL_USE_TLS:true}
+      # For a provider's implicit-TLS port (465): set EMAIL_USE_SSL=true and EMAIL_USE_TLS=false.
+      mail.smtp.ssl.enable: ${EMAIL_USE_SSL:false}
+      mail.smtp.connectiontimeout: 10000
+      mail.smtp.timeout: 10000
+      mail.smtp.writetimeout: 10000
+
+# The Swagger page at /swagger-ui/index.html. Off unless SWAGGER_ENABLED=true: it lists every address
+# of the API, admin ones included, so a production server leaves it off.
+springdoc:
+  api-docs:
+    enabled: ${SWAGGER_ENABLED:false}
+  swagger-ui:
+    enabled: ${SWAGGER_ENABLED:false}
+    tags-sorter: alpha
+
+server:
+  # Behind a load balancer set FORWARD_HEADERS_STRATEGY=native: the client's own
+  # address and https are then taken from the proxy's headers (trusted proxies only).
+  forward-headers-strategy: ${FORWARD_HEADERS_STRATEGY:none}
+  shutdown: graceful
+  tomcat:
+    threads:
+      max: ${SERVER_THREADS:200}
+    # A client that connects and then sends nothing is dropped after 10 seconds.
+    connection-timeout: 10s
+
+app:
+  secret: ${SECRET_KEY}
+  from-email: ${DEFAULT_FROM_EMAIL:noreply@example.com}
+  password-reset-frontend-url: ${PASSWORD_RESET_FRONTEND_URL:}
+  cors-allowed-origins: ${CORS_ALLOWED_ORIGINS:}
+  files-root: ${ACTIVITY_PRIVATE_ROOT:private_uploads}
+  toss-secret-key: ${TOSS_SECRET_KEY:}
+  toss-base-url: ${TOSS_BASE_URL:https://api.tosspayments.com}
+  # Comma-separated emails of the accounts that may register activities and set prices.
+  admin-emails: ${ADMIN_EMAILS:}
+  # Comma-separated keys that must be true in the signup "agreements" object, e.g. terms,privacy.
+  required-agreements: ${REQUIRED_AGREEMENTS:}
+  # Sign-in through a provider. Each is off (404) until its client id is set. The addresses are
+  # settings only so that tests can point them at a stand-in.
+  social:
+    kakao:
+      client-id: ${KAKAO_CLIENT_ID:}
+      client-secret: ${KAKAO_CLIENT_SECRET:}
+      token-url: ${KAKAO_TOKEN_URL:https://kauth.kakao.com/oauth/token}
+      profile-url: ${KAKAO_PROFILE_URL:https://kapi.kakao.com/v2/user/me}
+    naver:
+      client-id: ${NAVER_CLIENT_ID:}
+      client-secret: ${NAVER_CLIENT_SECRET:}
+      token-url: ${NAVER_TOKEN_URL:https://nid.naver.com/oauth2.0/token}
+      profile-url: ${NAVER_PROFILE_URL:https://openapi.naver.com/v1/nid/me}
+    google:
+      client-id: ${GOOGLE_CLIENT_ID:}
+      client-secret: ${GOOGLE_CLIENT_SECRET:}
+      token-url: ${GOOGLE_TOKEN_URL:https://oauth2.googleapis.com/token}
+      profile-url: ${GOOGLE_PROFILE_URL:https://openidconnect.googleapis.com/v1/userinfo}
+  auth:
+    code-ttl-seconds: ${AUTH_CODE_TTL_SECONDS:180}
+    verification-token-ttl-seconds: ${AUTH_VERIFICATION_TOKEN_TTL_SECONDS:600}
+    code-max-attempts: ${AUTH_CODE_MAX_ATTEMPTS:5}
+    send-cooldown-seconds: ${AUTH_SEND_COOLDOWN_SECONDS:60}
+    rate-window-seconds: ${AUTH_RATE_WINDOW_SECONDS:600}
+    ip-limit: ${AUTH_IP_LIMIT:30}
+    email-limit: ${AUTH_EMAIL_LIMIT:10}
+    access-ttl-seconds: ${JWT_ACCESS_TTL_SECONDS:300}
+    refresh-ttl-seconds: ${JWT_REFRESH_TTL_SECONDS:86400}
+    password-reset-ttl-seconds: ${PASSWORD_RESET_TIMEOUT:600}
