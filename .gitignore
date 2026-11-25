@@ -1,0 +1,11 @@
+.gradle/
+build/
+.idea/
+*.iml
+out/
+.env
+.env.*
+!.env.example
+private_uploads/
+CLAUDE.md
+.mcp.json
