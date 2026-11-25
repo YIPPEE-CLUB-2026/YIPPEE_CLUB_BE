@@ -64,7 +64,14 @@ Java 17, Spring Boot 4.1, MySQL 8, Flyway.
 - **열려 있는 곳**: SSH(22)는 **개발자 한 사람의 인터넷 주소에서만** 열려 있습니다. API(8080)는 2026-11-25부터
   **모든 주소에 열려 있습니다**(Swagger를 팀이 볼 수 있게 소유자가 직접 연 것). 암호화 없는 HTTP라서 주소를
   `http://`로 적어야 하고(`https://`로는 안 열림), 비밀번호와 토큰이 평문으로 지나갑니다. HTTPS 페이지로 배포된
-  프론트는 브라우저가 막아서 이 주소를 부를 수 없습니다. 그러려면 도메인과 HTTPS를 붙이고 80/443을 여는 작업이 따로 필요합니다.
+  프론트는 브라우저가 막아서 이 주소를 부를 수 없습니다.
+- **도메인과 HTTPS (2026-11-25 준비)**: 서비스 도메인은 `www.yippeclub.com`(프론트), API는 `https://api.yippeclub.com`입니다.
+  서버에 Caddy를 설치해 443으로 받은 요청을 앱(8080)으로 넘기게 했고([deploy/Caddyfile](deploy/Caddyfile)), 80·443을 열었습니다.
+  인증서는 Caddy가 스스로 받고 갱신합니다. **DNS에 `api` A 레코드(서버의 고정 주소)가 들어가야 인증서가 발급되고 그때부터
+  열립니다.** 그 전까지 `https://api.yippeclub.com`은 동작하지 않습니다. 함께 바꾼 서버 설정: 허용 origin에
+  `https://www.yippeclub.com`과 `https://yippeclub.com` 추가(로컬 주소는 유지), 비밀번호 재설정 페이지를
+  `https://www.yippeclub.com/password/reset`으로 지정(프론트가 이 경로에 페이지를 만들어야 함), `FORWARD_HEADERS_STRATEGY=native`.
+  프록시 헤더는 서버 안의 프록시가 보낸 것만 믿고, 8080으로 직접 들어온 요청이 보낸 것은 무시되는 것을 확인했습니다.
 - **비밀값**: 서버의 `/etc/yippee/env`(root만 읽음)에 있습니다. `SECRET_KEY`와 DB 비밀번호는 서버가 스스로 만들었고 어디에도
   출력되지 않았습니다. `CORS_ALLOWED_ORIGINS`(로컬 프론트 `localhost:3000`)와 메일 서버 주소(Gmail)는 들어 있습니다. `TOSS_SECRET_KEY`, 메일 계정(`EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, `DEFAULT_FROM_EMAIL`), `PASSWORD_RESET_FRONTEND_URL`, `ADMIN_EMAILS`, `REQUIRED_AGREEMENTS`는 비어 있어 사람이 채워야 합니다.
   지금 개발 서버에는 메일 계정(2026-11-25 첫 가입에서 인증 메일이 실제로 도착), 관리자 이메일, 토스 테스트 키가 들어 있습니다. 토스는 이
