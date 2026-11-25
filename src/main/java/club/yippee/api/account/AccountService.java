@@ -43,11 +43,15 @@ public class AccountService {
     /** Checked when the email is unknown, so that case costs as much time as a wrong password. */
     private final String nobodysHash;
     private final JdbcClient jdbc;
+    /** How long a withdrawn buyer's identity is kept beside the trade records (TRADE_RECORD_YEARS). */
+    private final int tradeRecordYears;
 
     AccountService(UserRepository users, RefreshSessionRepository sessions, EmailVerificationRepository verifications,
                    Tokens tokens, Digests digests, PasswordPolicy policy, PasswordEncoder encoder, Mailer mailer,
-                   AppProperties properties, JdbcClient jdbc) {
+                   AppProperties properties, JdbcClient jdbc,
+                   @org.springframework.beans.factory.annotation.Value("${app.trade-record-years:5}") int tradeRecordYears) {
         this.jdbc = jdbc;
+        this.tradeRecordYears = tradeRecordYears;
         this.users = users;
         this.sessions = sessions;
         this.verifications = verifications;
@@ -240,6 +244,68 @@ public class AccountService {
             user.nickname = nickname;
         }
         return view(user);
+    }
+
+    /**
+     * The member leaves. The row stays, because orders, refund requests and the download record
+     * point at it, but nothing personal is left in it and nothing opens it again. What the member
+     * entered about a child, the cart, favourites and provider links are destroyed at once.
+     * A member who ever ordered is remembered apart (withdrawn_members) for as long as the trade
+     * records must be kept; one who never ordered leaves nothing.
+     */
+    @Transactional
+    public void withdraw(Long userId) {
+        User user = users.lockById(userId).orElseThrow(ApiException::notFound);
+        if (properties.adminEmails().contains(user.email)) {
+            throw new ApiException(409, "INVALID_STATE", "관리자 계정은 탈퇴할 수 없습니다. 관리자 목록에서 먼저 빼야 합니다.");
+        }
+        // Money that is still moving needs its owner: a payment being confirmed, one waiting for a
+        // person's look, a refund that was asked for and not yet decided.
+        long moving = jdbc.sql("select (select count(*) from orders where user_id = ? and (status = 'review'"
+                        + " or (status = 'pending' and confirm_started_at is not null)))"
+                        + " + (select count(*) from refund_requests where user_id = ? and status = 'requested')")
+                .params(userId, userId).query(Long.class).single();
+        if (moving > 0) {
+            throw new ApiException(409, "INVALID_STATE", "진행 중인 결제나 환불 요청이 끝난 뒤에 탈퇴할 수 있습니다.");
+        }
+        jdbc.sql("update orders set status = 'cancelled' where user_id = ? and status = 'pending'").param(userId).update();
+
+        java.time.LocalDateTime now = java.time.LocalDateTime.now(java.time.ZoneOffset.UTC);
+        boolean traded = jdbc.sql("select count(*) from orders where user_id = ?").param(userId).query(Long.class).single() > 0;
+        if (traded) {
+            jdbc.sql("insert into withdrawn_members (user_id, email, name, phone, withdrawn_at, purge_after)"
+                            + " values (?, ?, ?, ?, ?, ?)")
+                    .params(userId, user.email, user.name, user.phone, now, now.plusYears(tradeRecordYears)).update();
+        } else {
+            // No trade to prove: where the free files went is nobody's business any more.
+            jdbc.sql("update pdf_downloads set ip_address = null, user_agent = null where user_id = ?").param(userId).update();
+        }
+        for (String table : new String[]{"children", "cart_items", "favorites", "social_accounts"}) {
+            jdbc.sql("delete from " + table + " where user_id = ?").param(userId).update();
+        }
+        jdbc.sql("delete from email_verifications where email = ?").param(user.email).update();
+        sessions.revokeAll(userId, Instant.now());
+
+        // The address is free for a new sign-up at once; this one can never be typed or mailed.
+        user.email = "withdrawn-" + userId + "@withdrawn.invalid";
+        user.name = "";
+        user.nickname = "";
+        user.phone = "";
+        user.agreements = "{}";
+        user.activeChildId = null;
+        user.passwordHash = encoder.encode(Digests.randomToken());
+        user.tokenVersion++;
+        user.active = false;
+        user.withdrawnAt = Instant.now();
+    }
+
+    /** Nightly: who a withdrawn buyer was is destroyed once the trade records no longer need it. */
+    @Transactional
+    public void purgeWithdrawn() {
+        java.time.LocalDateTime now = java.time.LocalDateTime.now(java.time.ZoneOffset.UTC);
+        jdbc.sql("update pdf_downloads set ip_address = null, user_agent = null where user_id in"
+                + " (select user_id from withdrawn_members where purge_after < ?)").param(now).update();
+        jdbc.sql("delete from withdrawn_members where purge_after < ?").param(now).update();
     }
 
     @Transactional
