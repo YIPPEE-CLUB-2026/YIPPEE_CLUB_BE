@@ -40,6 +40,9 @@ public class ChildService {
 
     @Transactional
     public Map<String, Object> create(Long userId, Changes changes) {
+        // Under the owner's lock: a request that was waiting while the member left must not
+        // write a child's name into the emptied account.
+        lockOwner(userId);
         return view(children.save(apply(new Child(userId), changes)));
     }
 
@@ -70,7 +73,8 @@ public class ChildService {
     }
 
     private void lockOwner(Long userId) {
-        jdbc.sql("select id from users where id = ? for update").param(userId).query(Long.class).single();
+        jdbc.sql("select id from users where id = ? and is_active = true for update").param(userId).query(Long.class)
+                .optional().orElseThrow(() -> new ApiException(401, "AUTHENTICATION_REQUIRED", "요청을 처리할 수 없습니다."));
     }
 
     private Child apply(Child child, Changes changes) {

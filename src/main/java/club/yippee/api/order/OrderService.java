@@ -130,7 +130,7 @@ public class OrderService {
     @Transactional
     public Map<String, Object> create(Long userId, List<Long> activityIds, List<Long> rentalIds,
                                       boolean agreedToRefundNotice) {
-        lockUser(userId);
+        lockLiveUser(userId);
         Order order = new Order(userId, "ord_" + Digests.randomHex(16));
         for (Long id : activityIds) {
             Activity activity = activities.findPublic(id).orElseThrow(() -> ApiException.field("activity_ids"));
@@ -211,7 +211,7 @@ public class OrderService {
     }
 
     private Order begin(Long userId, Long orderId, String paymentKey, String pgOrderId) {
-        lockUser(userId);
+        lockLiveUser(userId);
         Order order = orders.lockById(orderId).filter(found -> found.userId.equals(userId))
                 .orElseThrow(ApiException::notFound);
         if (order.status.equals(Order.PAID)) {
@@ -602,6 +602,8 @@ public class OrderService {
      */
     @Transactional
     public Map<String, Object> cancel(Long userId, Long orderId, String reason) {
+        // The buyer's row first, as everywhere: a member cannot leave between this and the request being stored.
+        lockLiveUser(userId);
         Order order = orders.lockById(orderId).filter(found -> found.userId.equals(userId))
                 .orElseThrow(ApiException::notFound);
         Map<String, Object> body = new LinkedHashMap<>();
@@ -730,6 +732,15 @@ public class OrderService {
                     throw ApiException.notFound();
                 }
                 throw new ApiException(403, "PERMISSION_DENIED", "구매한 활동지만 받을 수 있습니다.");
+        }
+    }
+
+    // For what the buyer asks for: the account may have been closed (or the member may have left)
+    // while this request waited for the row.
+    private void lockLiveUser(Long userId) {
+        lockUser(userId);
+        if (jdbc.sql("select count(*) from users where id = ? and is_active = true").param(userId).query(Long.class).single() == 0) {
+            throw new ApiException(401, "AUTHENTICATION_REQUIRED", "요청을 처리할 수 없습니다.");
         }
     }
 

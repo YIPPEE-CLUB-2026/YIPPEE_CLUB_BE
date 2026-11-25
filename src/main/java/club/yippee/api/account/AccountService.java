@@ -51,6 +51,9 @@ public class AccountService {
                    AppProperties properties, JdbcClient jdbc,
                    @org.springframework.beans.factory.annotation.Value("${app.trade-record-years:5}") int tradeRecordYears) {
         this.jdbc = jdbc;
+        if (tradeRecordYears < 1) {
+            throw new IllegalStateException("TRADE_RECORD_YEARS must be at least 1.");
+        }
         this.tradeRecordYears = tradeRecordYears;
         this.users = users;
         this.sessions = sessions;
@@ -236,7 +239,7 @@ public class AccountService {
     /** A null argument leaves that field as it is. */
     @Transactional
     public Map<String, Object> updateProfile(Long userId, String name, String nickname) {
-        User user = users.lockById(userId).orElseThrow(ApiException::notFound);
+        User user = users.lockById(userId).filter(found -> found.active).orElseThrow(ApiException::notFound);
         if (name != null) {
             user.name = name;
         }
@@ -256,6 +259,9 @@ public class AccountService {
     @Transactional
     public void withdraw(Long userId) {
         User user = users.lockById(userId).orElseThrow(ApiException::notFound);
+        if (user.withdrawnAt != null) {
+            return; // The same request sent twice: the first one did it.
+        }
         if (properties.adminEmails().contains(user.email)) {
             throw new ApiException(409, "INVALID_STATE", "관리자 계정은 탈퇴할 수 없습니다. 관리자 목록에서 먼저 빼야 합니다.");
         }
@@ -271,7 +277,9 @@ public class AccountService {
         jdbc.sql("update orders set status = 'cancelled' where user_id = ? and status = 'pending'").param(userId).update();
 
         java.time.LocalDateTime now = java.time.LocalDateTime.now(java.time.ZoneOffset.UTC);
-        boolean traded = jdbc.sql("select count(*) from orders where user_id = ?").param(userId).query(Long.class).single() > 0;
+        // Only where money moved. A free order or one that was never paid is no trade to keep a name for.
+        boolean traded = jdbc.sql("select count(*) from orders where user_id = ? and amount > 0"
+                + " and status in ('paid', 'refunded')").param(userId).query(Long.class).single() > 0;
         if (traded) {
             jdbc.sql("insert into withdrawn_members (user_id, email, name, phone, withdrawn_at, purge_after)"
                             + " values (?, ?, ?, ?, ?, ?)")
@@ -296,6 +304,7 @@ public class AccountService {
         user.passwordHash = encoder.encode(Digests.randomToken());
         user.tokenVersion++;
         user.active = false;
+        user.lastLoginAt = null;
         user.withdrawnAt = Instant.now();
     }
 
@@ -304,6 +313,9 @@ public class AccountService {
     public void purgeWithdrawn() {
         java.time.LocalDateTime now = java.time.LocalDateTime.now(java.time.ZoneOffset.UTC);
         jdbc.sql("update pdf_downloads set ip_address = null, user_agent = null where user_id in"
+                + " (select user_id from withdrawn_members where purge_after < ?)").param(now).update();
+        // What the buyer and the admin wrote in their own words can name people.
+        jdbc.sql("update refund_requests set reason = '', admin_note = null where user_id in"
                 + " (select user_id from withdrawn_members where purge_after < ?)").param(now).update();
         jdbc.sql("delete from withdrawn_members where purge_after < ?").param(now).update();
     }

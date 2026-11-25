@@ -150,7 +150,9 @@ public class Activities {
      */
     public String downloadState(Long userId, Activity activity) {
         if (activity.published && activity.price == 0) {
-            return "ok";
+            // Free to everyone, but a link is a member's: it ends when the account does.
+            return jdbc.sql("select count(*) from users where id = ? and is_active = true").param(userId)
+                    .query(Long.class).single() > 0 ? "ok" : "none";
         }
         java.time.LocalDateTime now = java.time.LocalDateTime.now(java.time.ZoneOffset.UTC);
         return jdbc.sql("select e.expires_at, (select count(*) from refund_requests r where r.order_id = e.order_id"

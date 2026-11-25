@@ -122,6 +122,14 @@ class WithdrawalApiTest extends ApiTestBase {
         assertThat(count("select count(*) from withdrawn_members")).isZero();
         assertThat(count("select count(*) from pdf_downloads where ip_address is not null or user_agent is not null")).isZero();
         assertThat(count("select count(*) from users where email = 'nobuy@example.com'")).isZero();
+        assertThat(count("select count(*) from users where last_login_at is not null")).isZero();
+
+        // Neither does one whose only orders were free or never paid: no money moved, no name is kept.
+        Session browser = signUp("browser@example.com");
+        order(browser, "pending", false);
+        jdbc.sql("update orders set amount = 0, status = 'paid' where id = ?").param(order(browser, "pending", false)).update();
+        delete(ME, browser.access()).andExpect(status().isOk());
+        assertThat(count("select count(*) from withdrawn_members")).isZero();
     }
 
     @Test
@@ -161,5 +169,26 @@ class WithdrawalApiTest extends ApiTestBase {
         assertThat(count("select count(*) from withdrawn_members")).isZero();
         assertThat(count("select count(*) from pdf_downloads where ip_address is not null or user_agent is not null")).isZero();
         assertThat(count("select count(*) from orders where user_id = ?", member.userId())).isEqualTo(1);
+        // Words the buyer wrote can name people: they go with the name.
+        assertThat(jdbc.sql("select reason from refund_requests").query(String.class).single()).isEmpty();
+    }
+
+    // A link to a free sheet is a member's link: it ends when the account does, so no download is
+    // recorded under an account that has left.
+    @Test
+    void aLinkToAFreeSheetEndsWithTheAccount() throws Exception {
+        Session member = signUp("free@example.com");
+        long sheet = activity();
+        jdbc.sql("update activities set price = 0 where id = ?").param(sheet).update();
+        java.nio.file.Files.createDirectories(java.nio.file.Path.of("build/test-files/a"));
+        java.nio.file.Files.write(java.nio.file.Path.of("build/test-files/a/p.pdf"), "%PDF-1.4\n%%EOF".getBytes());
+        String link = ((String) read(post("/api/v1/activities/" + sheet + "/download", member.access(), null)
+                .andExpect(status().isOk()), "$.download_url")).replace("http://localhost", "");
+        get(link, null).andExpect(status().isOk());
+        long recorded = count("select count(*) from pdf_downloads");
+        delete(ME, member.access()).andExpect(status().isOk());
+        // The sheet itself stays free to everyone; only the member's link, and its record, stop.
+        get(link, null).andExpect(status().isOk());
+        assertThat(count("select count(*) from pdf_downloads")).isEqualTo(recorded);
     }
 }
