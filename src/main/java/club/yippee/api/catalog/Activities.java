@@ -265,11 +265,56 @@ public class Activities {
             activity.pdfPath = store(pdf, "pdf");
         }
         activity.updatedAt = Instant.now();
+        removeAfterCommit(replaced);
+        return adminView(activity);
+    }
+
+    /** The most sample pages one activity may have. */
+    public static final int MAX_PREVIEWS = 5;
+
+    /**
+     * Replaces the activity's sample pages with these images, in this order. An empty list takes
+     * them all away. The old files are removed only once the change is committed.
+     */
+    @Transactional
+    public Map<String, Object> replacePreviews(Long id, List<byte[]> images, List<String> extensions) throws IOException {
+        Activity activity = repository.lockAny(id).orElseThrow(ApiException::notFound);
+        List<String> replaced = jdbc.sql("select path from activity_previews where activity_id = ?")
+                .param(id).query(String.class).list();
+        jdbc.sql("delete from activity_previews where activity_id = ?").param(id).update();
+        for (int index = 0; index < images.size(); index++) {
+            jdbc.sql("insert into activity_previews (activity_id, position, path) values (?, ?, ?)")
+                    .params(id, index + 1, store(images.get(index), extensions.get(index))).update();
+        }
+        // The links carry this moment, so a browser never shows an old page under a new set.
+        activity.updatedAt = Instant.now();
+        removeAfterCommit(replaced);
+        return previews(activity);
+    }
+
+    /** Links to the activity's sample pages, in order. They lead back through this server. */
+    public Map<String, Object> previews(Activity activity) {
+        List<String> links = jdbc.sql("select position from activity_previews where activity_id = ? order by position")
+                .param(activity.id).query(Integer.class).list().stream()
+                .map(position -> ServletUriComponentsBuilder.fromCurrentContextPath()
+                        .path("/api/v1/activities/{id}/previews/{position}").buildAndExpand(activity.id, position)
+                        .toUriString() + "?v=" + activity.updatedAt.getEpochSecond())
+                .toList();
+        return Map.of("preview_urls", links);
+    }
+
+    /** One stored sample page, or null when there is none at that place. */
+    Resource preview(Activity activity, int position) {
+        return jdbc.sql("select path from activity_previews where activity_id = ? and position = ?")
+                .params(activity.id, position).query(String.class).optional().map(this::stored).orElse(null);
+    }
+
+    private void removeAfterCommit(List<String> names) {
         org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
                 new org.springframework.transaction.support.TransactionSynchronization() {
                     @Override
                     public void afterCommit() {
-                        for (String name : replaced) {
+                        for (String name : names) {
                             try {
                                 Files.deleteIfExists(filesRoot.resolve(name).normalize());
                             } catch (IOException leftBehind) {
@@ -278,7 +323,6 @@ public class Activities {
                         }
                     }
                 });
-        return adminView(activity);
     }
 
     private Activity apply(Activity activity, Draft draft) {
@@ -351,7 +395,11 @@ public class Activities {
 
     /** The stored file, or null when it is not there. A stored path can never lead outside the root. */
     Resource file(Activity activity, String kind) {
-        Path path = filesRoot.resolve("pdf".equals(kind) ? activity.pdfPath : activity.imagePath).normalize();
+        return stored("pdf".equals(kind) ? activity.pdfPath : activity.imagePath);
+    }
+
+    private Resource stored(String name) {
+        Path path = filesRoot.resolve(name).normalize();
         return path.startsWith(filesRoot) && Files.isRegularFile(path) ? new FileSystemResource(path) : null;
     }
 
