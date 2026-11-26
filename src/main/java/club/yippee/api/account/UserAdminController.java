@@ -42,6 +42,9 @@ public class UserAdminController {
             throw ApiException.field("is_active");
         }
         User user = users.lockById(id).orElseThrow(ApiException::notFound);
+        if (user.withdrawnAt != null) {
+            throw new ApiException(409, "INVALID_STATE", "탈퇴한 계정입니다.");
+        }
         user.active = active;
         if (!active) {
             sessions.revokeAll(user.id, java.time.Instant.now());

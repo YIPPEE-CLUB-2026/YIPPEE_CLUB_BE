@@ -37,6 +37,8 @@ public class User {
     boolean active = true;
     Instant lastLoginAt;
     Instant createdAt = Instant.now();
+    /** Set when the member left. Such a row is never opened again. */
+    Instant withdrawnAt;
 
     protected User() {
     }

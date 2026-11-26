@@ -66,7 +66,7 @@ public abstract class ApiTestBase {
     @BeforeEach
     void emptyTables() {
         // Money records first: nothing cascades into them. The rest goes with users and activities.
-        for (String table : new String[]{"refund_requests", "pdf_downloads", "purchase_entitlements", "order_items",
+        for (String table : new String[]{"withdrawn_members", "refund_requests", "pdf_downloads", "purchase_entitlements", "order_items",
                 "orders", "users", "activities",
                 "categories", "email_verifications", "auth_rate_limits"}) {
             jdbc.sql("delete from " + table).update();
