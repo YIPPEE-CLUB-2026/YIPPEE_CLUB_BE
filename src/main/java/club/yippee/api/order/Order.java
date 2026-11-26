@@ -55,6 +55,8 @@ public class Order {
     /** Set when a confirm call went out. pending with this set means "the outcome is not known yet". */
     Instant confirmStartedAt;
     Instant paidAt;
+    /** When the money went back. The sales chart counts the refund at this moment. */
+    Instant refundedAt;
     /** When the buyer agreed to the refund notice. Every order that costs money has it. */
     Instant refundNoticeAgreedAt;
     Instant createdAt = Instant.now();

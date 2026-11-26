@@ -66,7 +66,7 @@ public abstract class ApiTestBase {
     @BeforeEach
     void emptyTables() {
         // Money records first: nothing cascades into them. The rest goes with users and activities.
-        for (String table : new String[]{"withdrawn_members", "refund_requests", "pdf_downloads", "purchase_entitlements", "order_items",
+        for (String table : new String[]{"withdrawn_members", "refund_requests", "pdf_downloads", "worksheet_issuances", "purchase_entitlements", "order_items",
                 "orders", "users", "activities",
                 "categories", "email_verifications", "auth_rate_limits"}) {
             jdbc.sql("delete from " + table).update();
@@ -153,6 +153,20 @@ public abstract class ApiTestBase {
     protected static String signupBody(String email, String proof, String password) {
         return q("{'identifier':'%s','verification_token':'%s','password':'%s','agreements':{'terms':true}}"
                 .formatted(email, proof, password));
+    }
+
+    /** A real PDF of blank A4 pages: the server opens what it is given, so a made-up header is not enough. */
+    protected static byte[] samplePdf(int pages) {
+        try (org.apache.pdfbox.pdmodel.PDDocument document = new org.apache.pdfbox.pdmodel.PDDocument();
+             java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream()) {
+            for (int page = 0; page < pages; page++) {
+                document.addPage(new org.apache.pdfbox.pdmodel.PDPage(org.apache.pdfbox.pdmodel.common.PDRectangle.A4));
+            }
+            document.save(out);
+            return out.toByteArray();
+        } catch (java.io.IOException impossible) {
+            throw new java.io.UncheckedIOException(impossible);
+        }
     }
 
     /** The server stores times as UTC wall-clock values. */

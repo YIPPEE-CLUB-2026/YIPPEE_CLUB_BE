@@ -16,7 +16,7 @@ class AdminApiTest extends ApiTestBase {
 
     private static final String ADMIN = "/api/v1/admin";
     private static final byte[] PNG = {(byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0, 0};
-    private static final byte[] PDF = "%PDF-1.4\n1 0 obj\n%%EOF".getBytes();
+    private static final byte[] PDF = samplePdf(1);
 
     private MockMultipartHttpServletRequestBuilder upload(Session who, byte[] image, byte[] pdf, String price, String categories) {
         MockMultipartHttpServletRequestBuilder builder = multipart(ADMIN + "/activities");
@@ -142,7 +142,7 @@ class AdminApiTest extends ApiTestBase {
         get(address + "/files/pdf", null).andExpect(status().isOk()).andExpect(content().bytes(PDF));
 
         // Replacing the PDF: the same address then serves the new file, and a bad file changes nothing.
-        byte[] newer = "%PDF-1.7\nsecond edition\n%%EOF".getBytes();
+        byte[] newer = samplePdf(2);
         mvc.perform(multipart(ADMIN + "/activities/" + id + "/files")
                 .file(new MockMultipartFile("pdf", "v2.pdf", "application/pdf", newer))
                 .header("Authorization", "Bearer " + admin.access())).andExpect(status().isOk());
