@@ -161,6 +161,10 @@ public class AccountService {
         if (!user.active) {
             throw new ApiException(403, "PERMISSION_DENIED", "이용할 수 없는 계정입니다.");
         }
+        if (user.name.isEmpty()) {
+            // A starting value only: a name the user has set is never replaced.
+            user.name = who.name();
+        }
         user.lastLoginAt = Instant.now();
         Map<String, Object> body = tokens.issue(user);
         body.put("is_new_user", created);
