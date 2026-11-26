@@ -2,10 +2,8 @@ package club.yippee.api.catalog;
 
 import java.io.IOException;
 import java.nio.file.Files;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Instant;
-import java.util.Base64;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -31,7 +29,6 @@ import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
 import club.yippee.api.common.ApiException;
 import club.yippee.api.common.AppProperties;
-import club.yippee.api.common.Digests;
 
 /** The public catalogue of activities, and the files behind each one. */
 @Service
@@ -48,16 +45,13 @@ public class Activities {
     public static final int RENTAL_DAYS = 7;
     /** How long a download link stays good. */
     static final int LINK_SECONDS = 300;
-    private static final String DOWNLOAD = "download";
 
     private final ActivityRepository repository;
-    private final Digests digests;
     private final JdbcClient jdbc;
     private final Path filesRoot;
 
-    Activities(ActivityRepository repository, Digests digests, JdbcClient jdbc, AppProperties properties) {
+    Activities(ActivityRepository repository, JdbcClient jdbc, AppProperties properties) {
         this.repository = repository;
-        this.digests = digests;
         this.jdbc = jdbc;
         // shortcut: files live on this server's disk, so only one server can serve them.
         // Move them to private object storage (S3) before running a second instance.
@@ -127,24 +121,8 @@ public class Activities {
     }
 
     /**
-     * A link to the PDF that works for a few minutes without a login header, so a browser can
-     * simply open it. It is signed for this user and this activity.
-     */
-    public Map<String, Object> downloadLink(Long userId, Activity activity) {
-        Instant expires = Instant.now().plusSeconds(LINK_SECONDS);
-        String payload = userId + ":" + activity.id + ":" + expires.getEpochSecond();
-        String token = Base64.getUrlEncoder().withoutPadding().encodeToString(payload.getBytes(StandardCharsets.UTF_8))
-                + "." + digests.of(DOWNLOAD, payload);
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("download_url", fileUrl(activity.id, "pdf") + "?token=" + token);
-        body.put("expires_at", expires.truncatedTo(java.time.temporal.ChronoUnit.SECONDS).toString());
-        body.put("file_name", "activity-" + activity.id + ".pdf");
-        return body;
-    }
-
-    /**
      * Whether this user may have the PDF at this moment: "ok", or why not ("none", "expired", "refund").
-     * The one rule for both handing out a link and sending the file, so a link issued earlier stops
+     * The one rule for both handing out a link (see Issuances) and sending the file, so a link issued earlier stops
      * working the moment the right ends: the 7 days ran out, the order was refunded, the account was closed.
      * While a refund request waits nothing is sent either, so what the admin reads cannot change under them.
      */
@@ -167,21 +145,6 @@ public class Activities {
                     }
                     return row.getLong("asking") > 0 ? "refund" : "ok";
                 }).optional().orElse("none");
-    }
-
-    /** The user an unexpired download link of ours was issued to, for this activity; null for anything else. */
-    Long downloadUser(Long activityId, String token) {
-        try {
-            int dot = token.lastIndexOf('.');
-            String payload = new String(Base64.getUrlDecoder().decode(token.substring(0, dot)), StandardCharsets.UTF_8);
-            String[] parts = payload.split(":");
-            boolean ours = parts.length == 3 && Long.parseLong(parts[1]) == activityId
-                    && Long.parseLong(parts[2]) > Instant.now().getEpochSecond()
-                    && Digests.same(token.substring(dot + 1), digests.of(DOWNLOAD, payload));
-            return ours ? Long.valueOf(parts[0]) : null;
-        } catch (IllegalArgumentException | IndexOutOfBoundsException malformed) {
-            return null;
-        }
     }
 
     /** The public activity, row-locked for the caller's transaction. */
@@ -220,7 +183,7 @@ public class Activities {
     }
 
     // The link never shows where the file is stored: it leads back through this server's checks.
-    private static String fileUrl(Long id, String kind) {
+    static String fileUrl(Long id, String kind) {
         return ServletUriComponentsBuilder.fromCurrentContextPath()
                 .path("/api/v1/activities/{id}/files/{kind}").buildAndExpand(id, kind).toUriString();
     }

@@ -24,6 +24,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import club.yippee.api.catalog.Activities;
 import club.yippee.api.catalog.Activity;
+import club.yippee.api.catalog.Issuances;
 import club.yippee.api.common.ApiException;
 import club.yippee.api.common.Digests;
 import club.yippee.api.common.RateLimiter;
@@ -47,16 +48,18 @@ public class OrderService {
 
     private final OrderRepository orders;
     private final Activities activities;
+    private final Issuances issuances;
     private final PaymentGateway gateway;
     private final JdbcClient jdbc;
     private final TransactionTemplate transaction;
     private final RateLimiter limiter;
 
-    OrderService(OrderRepository orders, Activities activities, PaymentGateway gateway, JdbcClient jdbc,
+    OrderService(OrderRepository orders, Activities activities, Issuances issuances, PaymentGateway gateway, JdbcClient jdbc,
                  PlatformTransactionManager transactions, RateLimiter limiter) {
         this.limiter = limiter;
         this.orders = orders;
         this.activities = activities;
+        this.issuances = issuances;
         this.gateway = gateway;
         this.jdbc = jdbc;
         this.transaction = new TransactionTemplate(transactions);
@@ -277,9 +280,11 @@ public class OrderService {
                     order.status = Order.CANCELLED;
                 } else if (order.status.equals(Order.REVIEW)) {
                     order.status = Order.REFUNDED;
+                    order.refundedAt = Instant.now();
                 } else if (order.status.equals(Order.PAID)) {
                     // Refunded on the payment company's side (for example from its dashboard).
                     order.status = Order.REFUNDED;
+                    order.refundedAt = Instant.now();
                     jdbc.sql("update purchase_entitlements set status = 'revoked', revoked_at = ?"
                             + " where order_id = ? and status = 'active'").params(utc(Instant.now()), order.id).update();
                     // The one place a refund request becomes approved: wherever the refund came from
@@ -714,15 +719,17 @@ public class OrderService {
     }
 
     /**
-     * A short-lived link to the PDF: for whoever holds the right at this moment, or for anyone
-     * signed in when the activity is free and public. The same rule is applied again when the file is sent.
+     * A short-lived link to the member's own copy of the PDF, with their code printed on it: for
+     * whoever holds the right at this moment, or for anyone signed in when the activity is free and
+     * public. The same rule is applied again when the file is sent.
+     * No transaction: the first request stores the member's code and writes the copy, and a file
+     * is not made while a database transaction is held open.
      */
-    @Transactional(readOnly = true)
     public Map<String, Object> download(Long userId, Long activityId) {
         Activity activity = activities.find(activityId).orElseThrow(ApiException::notFound);
         switch (activities.downloadState(userId, activity)) {
             case "ok":
-                return activities.downloadLink(userId, activity);
+                return issuances.link(userId, activity);
             case "expired":
                 throw new ApiException(403, "ACCESS_EXPIRED", "이용 기간이 끝난 활동지입니다.");
             case "refund":

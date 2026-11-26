@@ -260,7 +260,9 @@ public class AdminController {
             return false;
         }
         byte[] tail = Arrays.copyOfRange(bytes, Math.max(0, bytes.length - 1024), bytes.length);
-        return new String(tail, StandardCharsets.ISO_8859_1).contains("%%EOF");
+        // And it must be a PDF our code can be printed on: every copy a member receives carries one,
+        // so a locked or broken file is refused here, not when a buyer asks for it.
+        return new String(tail, StandardCharsets.ISO_8859_1).contains("%%EOF") && Issuances.stampable(bytes);
     }
 
     private static boolean starts(byte[] bytes, int... signature) {

@@ -181,7 +181,7 @@ class WithdrawalApiTest extends ApiTestBase {
         long sheet = activity();
         jdbc.sql("update activities set price = 0 where id = ?").param(sheet).update();
         java.nio.file.Files.createDirectories(java.nio.file.Path.of("build/test-files/a"));
-        java.nio.file.Files.write(java.nio.file.Path.of("build/test-files/a/p.pdf"), "%PDF-1.4\n%%EOF".getBytes());
+        java.nio.file.Files.write(java.nio.file.Path.of("build/test-files/a/p.pdf"), samplePdf(1));
         String link = ((String) read(post("/api/v1/activities/" + sheet + "/download", member.access(), null)
                 .andExpect(status().isOk()), "$.download_url")).replace("http://localhost", "");
         get(link, null).andExpect(status().isOk());
