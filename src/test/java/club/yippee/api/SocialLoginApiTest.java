@@ -239,6 +239,25 @@ class SocialLoginApiTest extends ApiTestBase {
     }
 
     @Test
+    void theProvidersNameFillsAnEmptyNameAndNeverReplacesOne() throws Exception {
+        profile("google", "{'sub':'g-9','email':'named@gmail.com','email_verified':true,'name':'  Kim Parent  '}");
+        signIn("google", AGREED).andExpect(status().isCreated()).andExpect(jsonPath("$.user.name").value("Kim Parent"));
+
+        jdbc.sql("update users set name = 'Mine'").update();
+        profile("google", "{'sub':'g-9','email':'named@gmail.com','email_verified':true,'name':'Other'}");
+        signIn("google", "").andExpect(status().isOk()).andExpect(jsonPath("$.user.name").value("Mine"));
+
+        // Kakao's is the profile nickname; a name that is too long or not text is left out, never an error.
+        profile("kakao", "{'id':77,'kakao_account':{'email':'k@example.com','is_email_valid':true,"
+                + "'is_email_verified':true,'profile':{'nickname':'카카오닉'}}}");
+        signIn("kakao", AGREED).andExpect(status().isCreated()).andExpect(jsonPath("$.user.name").value("카카오닉"));
+        profile("google", "{'sub':'g-10','email':'long@gmail.com','email_verified':true,'name':'" + "가".repeat(101) + "'}");
+        signIn("google", AGREED).andExpect(status().isCreated()).andExpect(jsonPath("$.user.name").value(""));
+        profile("naver", "{'resultcode':'00','message':'success','response':{'id':'nv-n','email':'n@example.com','name':7}}");
+        signIn("naver", AGREED).andExpect(status().isCreated()).andExpect(jsonPath("$.user.name").value(""));
+    }
+
+    @Test
     void aClosedAccountStaysClosed() throws Exception {
         profile("kakao", KAKAO_OK);
         signIn("kakao", AGREED).andExpect(status().isCreated());
