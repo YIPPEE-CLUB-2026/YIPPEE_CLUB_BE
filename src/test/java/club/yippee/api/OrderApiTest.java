@@ -45,7 +45,7 @@ class OrderApiTest extends ApiTestBase {
         sheet = activity("유료 활동지", 1900, true);
         Path folder = Path.of("build/test-files/activities");
         Files.createDirectories(folder);
-        Files.write(folder.resolve("play.pdf"), "%PDF-1.4\n%%EOF".getBytes());
+        Files.write(folder.resolve("play.pdf"), samplePdf(1));
         Files.write(folder.resolve("cover.png"), new byte[]{(byte) 0x89, 'P', 'N', 'G'});
     }
 
@@ -270,6 +270,8 @@ class OrderApiTest extends ApiTestBase {
         post("/api/v1/admin/orders/" + order[0] + "/refund", admin.access(), q("{'reason':'합의 환불'}")).andExpect(status().isOk());
         expectError(get(link, null), 404, "NOT_FOUND");
         assertThat(count("select count(*) from pdf_downloads")).isEqualTo(1);
+        // The refund has its own time: the sales chart counts it on that day, not on the day of the sale.
+        assertThat(count("select count(*) from orders where status = 'refunded' and refunded_at >= paid_at")).isEqualTo(1);
 
         // So does the link of an account that was closed.
         paid(other, "pk_2");
@@ -737,12 +739,13 @@ class OrderApiTest extends ApiTestBase {
         when(gateway.confirm(anyString(), anyString(), anyLong())).thenReturn(done(1900));
         confirm(buyer, order, "pk_1").andExpect(status().isOk());
         ResultActions issued = post(download, buyer.access(), null).andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(3))
-                .andExpect(jsonPath("$.file_name").value("activity-" + sheet + ".pdf"))
+                .andExpect(jsonPath("$.length()").value(4))
                 .andExpect(jsonPath("$.expires_at").isString());
         String link = ((String) read(issued, "$.download_url")).replace("http://localhost", "");
         assertThat(link).startsWith(pdf + "?token=");
-        get(link, null).andExpect(status().isOk()).andExpect(content().bytes("%PDF-1.4\n%%EOF".getBytes()));
+        // What arrives is the buyer's own copy with their code on it, never the stored original.
+        assertThat(get(link, null).andExpect(status().isOk()).andReturn().getResponse().getContentAsByteArray())
+                .startsWith("%PDF-".getBytes()).isNotEqualTo(samplePdf(1));
         expectError(post(download, other.access(), null), 403, "PERMISSION_DENIED");
         // Each delivery through a buyer's link leaves a record. A refused link leaves none, and neither
         // does a HEAD request, which asks about the file without receiving it.

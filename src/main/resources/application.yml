@@ -72,6 +72,9 @@ app:
   admin-emails: ${ADMIN_EMAILS:}
   # Comma-separated keys that must be true in the signup "agreements" object, e.g. terms,privacy.
   required-agreements: ${REQUIRED_AGREEMENTS:}
+  # Years a withdrawn buyer's e-mail, name and phone are kept beside the trade records, then destroyed.
+  # The e-commerce act asks five years for contract, payment and supply records.
+  trade-record-years: ${TRADE_RECORD_YEARS:5}
   # Sign-in through a provider. Each is off (404) until its client id is set. The addresses are
   # settings only so that tests can point them at a stand-in.
   social:

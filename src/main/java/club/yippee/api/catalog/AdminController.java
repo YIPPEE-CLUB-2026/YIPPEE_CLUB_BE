@@ -112,6 +112,35 @@ public class AdminController {
                 imageBytes, imageExtension, pdfBytes));
     }
 
+    /**
+     * A form upload of one to five "previews" images: the sample pages shown before buying.
+     * They replace whatever was there, in the order sent.
+     */
+    @PostMapping(value = "/activities/{id:[0-9]{1,18}}/previews", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    Map<String, Object> replacePreviews(@PathVariable Long id,
+                                        @RequestParam(required = false) List<MultipartFile> previews) throws IOException {
+        List<byte[]> images = new java.util.ArrayList<>();
+        List<String> extensions = new java.util.ArrayList<>();
+        boolean sound = previews != null && !previews.isEmpty() && previews.size() <= Activities.MAX_PREVIEWS;
+        for (MultipartFile page : sound ? previews : List.<MultipartFile>of()) {
+            byte[] bytes = page.getSize() > MAX_IMAGE_BYTES ? null : page.getBytes();
+            String extension = imageExtension(bytes);
+            sound &= extension != null;
+            images.add(bytes);
+            extensions.add(extension);
+        }
+        if (!sound) {
+            throw ApiException.field("previews");
+        }
+        return activities.replacePreviews(id, images, extensions);
+    }
+
+    /** Takes the activity's sample pages away. */
+    @org.springframework.web.bind.annotation.DeleteMapping("/activities/{id:[0-9]{1,18}}/previews")
+    Map<String, Object> removePreviews(@PathVariable Long id) throws IOException {
+        return activities.replacePreviews(id, List.of(), List.of());
+    }
+
     /** A form upload with "image", "pdf" or both: replaces that file of an existing activity. */
     @PostMapping(value = "/activities/{id:[0-9]+}/files", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     Map<String, Object> replaceFiles(@PathVariable String id,
@@ -231,7 +260,9 @@ public class AdminController {
             return false;
         }
         byte[] tail = Arrays.copyOfRange(bytes, Math.max(0, bytes.length - 1024), bytes.length);
-        return new String(tail, StandardCharsets.ISO_8859_1).contains("%%EOF");
+        // And it must be a PDF our code can be printed on: every copy a member receives carries one,
+        // so a locked or broken file is refused here, not when a buyer asks for it.
+        return new String(tail, StandardCharsets.ISO_8859_1).contains("%%EOF") && Issuances.stampable(bytes);
     }
 
     private static boolean starts(byte[] bytes, int... signature) {

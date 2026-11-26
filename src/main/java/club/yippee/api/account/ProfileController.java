@@ -73,6 +73,13 @@ public class ProfileController {
         return AuthController.DONE;
     }
 
+    /** The member leaves. See AccountService.withdraw for what is destroyed and what is kept. */
+    @org.springframework.web.bind.annotation.DeleteMapping
+    Map<String, Object> withdraw(@AuthenticationPrincipal Long userId) {
+        accounts.withdraw(userId);
+        return AuthController.DONE;
+    }
+
     /** Nightly: rows that can no longer be used are removed, so the three tables stop growing. */
     @Scheduled(cron = "0 0 4 * * *", zone = "Asia/Seoul")
     @Transactional
@@ -81,5 +88,6 @@ public class ProfileController {
         sessions.deleteExpiredBefore(dayAgo);
         verifications.deleteCreatedBefore(dayAgo);
         jdbc.sql("delete from auth_rate_limits where window_start < ?").param(dayAgo.getEpochSecond()).update();
+        accounts.purgeWithdrawn();
     }
 }

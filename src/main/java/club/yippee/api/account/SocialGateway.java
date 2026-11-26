@@ -32,9 +32,10 @@ public class SocialGateway {
     /**
      * Who the provider says this is. The id is the provider's own, stable number for the user.
      * The email is null when none usable came; verified is true only when the provider itself
-     * vouches that the address belongs to this user.
+     * vouches that the address belongs to this user. The name is what the provider calls the user,
+     * empty when it gave none that fits our column.
      */
-    public record Identity(String id, String email, boolean emailVerified) {
+    public record Identity(String id, String email, boolean emailVerified, String name) {
     }
 
     private static final Logger log = LoggerFactory.getLogger(SocialGateway.class);
@@ -115,8 +116,9 @@ public class SocialGateway {
         }
         Map<?, ?> account = profile.get("kakao_account") instanceof Map<?, ?> map ? map : Map.of();
         boolean valid = Boolean.TRUE.equals(account.get("is_email_valid"));
+        Map<?, ?> shown = account.get("profile") instanceof Map<?, ?> map ? map : Map.of();
         return new Identity(String.valueOf(id), valid ? email(account.get("email")) : null,
-                Boolean.TRUE.equals(account.get("is_email_verified")));
+                Boolean.TRUE.equals(account.get("is_email_verified")), name(shown.get("nickname")));
     }
 
     // Naver's profile says nothing about whether the contact email was verified, and the user may
@@ -126,7 +128,7 @@ public class SocialGateway {
                 || !(response.get("id") instanceof String id)) {
             return null;
         }
-        return new Identity(id, email(response.get("email")), false);
+        return new Identity(id, email(response.get("email")), false, name(response.get("name")));
     }
 
     // Google vouches for an address only when it runs the mailbox: gmail.com, or a hosted domain ("hd").
@@ -139,7 +141,13 @@ public class SocialGateway {
         boolean verified = "true".equals(String.valueOf(profile.get("email_verified")));
         boolean googles = email != null && (email.endsWith("@gmail.com")
                 || (profile.get("hd") instanceof String domain && !domain.isEmpty()));
-        return new Identity(id, email, verified && googles);
+        return new Identity(id, email, verified && googles, name(profile.get("name")));
+    }
+
+    // Only a starting value the user can change, so one that does not fit is dropped, not cut.
+    private static String name(Object value) {
+        String text = value instanceof String given ? given.strip() : "";
+        return text.length() <= 100 ? text : "";
     }
 
     private static String email(Object value) {

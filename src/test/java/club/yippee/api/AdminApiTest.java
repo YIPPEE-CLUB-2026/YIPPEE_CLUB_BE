@@ -1,5 +1,6 @@
 package club.yippee.api;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -15,7 +16,7 @@ class AdminApiTest extends ApiTestBase {
 
     private static final String ADMIN = "/api/v1/admin";
     private static final byte[] PNG = {(byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0, 0};
-    private static final byte[] PDF = "%PDF-1.4\n1 0 obj\n%%EOF".getBytes();
+    private static final byte[] PDF = samplePdf(1);
 
     private MockMultipartHttpServletRequestBuilder upload(Session who, byte[] image, byte[] pdf, String price, String categories) {
         MockMultipartHttpServletRequestBuilder builder = multipart(ADMIN + "/activities");
@@ -33,6 +34,61 @@ class AdminApiTest extends ApiTestBase {
             builder.header("Authorization", "Bearer " + who.access());
         }
         return builder;
+    }
+
+    private MockMultipartHttpServletRequestBuilder previews(Session who, long id, byte[]... pages) {
+        MockMultipartHttpServletRequestBuilder builder = multipart(ADMIN + "/activities/" + id + "/previews");
+        for (byte[] page : pages) {
+            builder.file(new MockMultipartFile("previews", "page.png", "image/png", page));
+        }
+        return (MockMultipartHttpServletRequestBuilder) builder.header("Authorization", "Bearer " + who.access());
+    }
+
+    // Sample pages shown before buying: an admin uploads up to five images, anyone may look at
+    // them while the activity is on the catalogue.
+    @Test
+    void anAdminUploadsSamplePagesThatAnyoneMaySeeBeforeBuying() throws Exception {
+        Session admin = signUp("admin@example.com");
+        Session member = signUp("member@example.com");
+        Number category = read(post(ADMIN + "/categories", admin.access(), q("{'name':'자연탐구'}")), "$.id");
+        Number created = read(mvc.perform(upload(admin, PNG, PDF, "1500", category.toString())), "$.id");
+        long id = created.longValue();
+        String preview = "/api/v1/activities/" + id + "/preview";
+        byte[] second = {(byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 1, 1, 1, 1, 1};
+
+        get(preview, null).andExpect(status().isOk()).andExpect(jsonPath("$.preview_urls.length()").value(0));
+        expectError(mvc.perform(previews(member, id, PNG)), 403, "PERMISSION_DENIED");
+        mvc.perform(previews(admin, id, PNG, second)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.preview_urls.length()").value(2));
+
+        ResultActions listed = get(preview, null).andExpect(jsonPath("$.preview_urls.length()").value(2));
+        String first = ((String) read(listed, "$.preview_urls[0]")).replace("http://localhost", "");
+        String other = ((String) read(listed, "$.preview_urls[1]")).replace("http://localhost", "");
+        assertThat(first).startsWith("/api/v1/activities/" + id + "/previews/1");
+        get(first, null).andExpect(status().isOk()).andExpect(content().bytes(PNG));
+        get(other, null).andExpect(status().isOk()).andExpect(content().bytes(second));
+
+        // A new upload replaces the whole set; a bad file or too many change nothing.
+        mvc.perform(previews(admin, id, second)).andExpect(status().isOk());
+        get(first, null).andExpect(content().bytes(second));
+        expectError(get("/api/v1/activities/" + id + "/previews/2", null), 404, "NOT_FOUND");
+        expectError(mvc.perform(previews(admin, id, "not an image".getBytes())), 400, "VALIDATION_ERROR");
+        expectError(mvc.perform(previews(admin, id, PNG, PNG, PNG, PNG, PNG, PNG)), 400, "VALIDATION_ERROR");
+        expectError(mvc.perform(previews(admin, id)), 400, "VALIDATION_ERROR");
+        expectError(mvc.perform(previews(admin, 999999, PNG)), 404, "NOT_FOUND");
+        get(preview, null).andExpect(jsonPath("$.preview_urls.length()").value(1));
+        for (String odd : new String[]{"0", "6", "x", "99999999999999999999"}) {
+            expectError(get("/api/v1/activities/" + id + "/previews/" + odd, null), 404, "NOT_FOUND");
+        }
+
+        // Off the catalogue, the samples are off too. Taking them away leaves an empty list.
+        patch(ADMIN + "/activities/" + id, admin.access(), q("{'is_public':false}")).andExpect(status().isOk());
+        expectError(get(preview, null), 404, "NOT_FOUND");
+        expectError(get(first, null), 404, "NOT_FOUND");
+        patch(ADMIN + "/activities/" + id, admin.access(), q("{'is_public':true}")).andExpect(status().isOk());
+        expectError(delete(ADMIN + "/activities/" + id + "/previews", member.access()), 403, "PERMISSION_DENIED");
+        delete(ADMIN + "/activities/" + id + "/previews", admin.access()).andExpect(status().isOk());
+        get(preview, null).andExpect(jsonPath("$.preview_urls.length()").value(0));
     }
 
     @Test
@@ -86,7 +142,7 @@ class AdminApiTest extends ApiTestBase {
         get(address + "/files/pdf", null).andExpect(status().isOk()).andExpect(content().bytes(PDF));
 
         // Replacing the PDF: the same address then serves the new file, and a bad file changes nothing.
-        byte[] newer = "%PDF-1.7\nsecond edition\n%%EOF".getBytes();
+        byte[] newer = samplePdf(2);
         mvc.perform(multipart(ADMIN + "/activities/" + id + "/files")
                 .file(new MockMultipartFile("pdf", "v2.pdf", "application/pdf", newer))
                 .header("Authorization", "Bearer " + admin.access())).andExpect(status().isOk());
