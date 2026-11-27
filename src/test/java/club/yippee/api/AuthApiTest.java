@@ -141,7 +141,7 @@ class AuthApiTest extends ApiTestBase {
         post(AUTH + "/login", null, login("PARENT@EXAMPLE.COM", PASSWORD)).andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(3))
                 .andExpect(jsonPath("$.access_token").isString()).andExpect(jsonPath("$.refresh_token").isString())
-                .andExpect(jsonPath("$.user.length()").value(5))
+                .andExpect(jsonPath("$.user.length()").value(8))
                 .andExpect(jsonPath("$.user.id").value(account.userId())).andExpect(jsonPath("$.user.email").value(EMAIL))
                 .andExpect(jsonPath("$.user.phone").value("")).andExpect(jsonPath("$.user.nickname").value(""));
         assertThat(count("select count(*) from users where last_login_at is not null")).isEqualTo(1);
@@ -216,15 +216,54 @@ class AuthApiTest extends ApiTestBase {
     }
 
     @Test
+    void theParentInfoScreenStoresNicknameRelationAndAgeGroup() throws Exception {
+        Session account = signUp(EMAIL);
+        // A new account has none of it, and says so: the app sends such a member to the screen.
+        get(ME, account.access()).andExpect(jsonPath("$.relation").isEmpty()).andExpect(jsonPath("$.age_group").isEmpty())
+                .andExpect(jsonPath("$.profile_completed").value(false));
+
+        // The age group is optional: a nickname and a relation complete the profile.
+        patch(ME, account.access(), q("{'nickname':' 도영 엄마 ','relation':'mother'}")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.nickname").value("도영 엄마")).andExpect(jsonPath("$.relation").value("mother"))
+                .andExpect(jsonPath("$.age_group").isEmpty()).andExpect(jsonPath("$.profile_completed").value(true));
+        patch(ME, account.access(), q("{'age_group':'30s'}")).andExpect(jsonPath("$.age_group").value("30s"))
+                .andExpect(jsonPath("$.relation").value("mother"));
+        post(AUTH + "/login", null, login(EMAIL, PASSWORD))
+                .andExpect(jsonPath("$.user.relation").value("mother")).andExpect(jsonPath("$.user.age_group").value("30s"))
+                .andExpect(jsonPath("$.user.profile_completed").value(true));
+        for (String value : List.of("father", "grandparent", "other")) {
+            patch(ME, account.access(), q("{'relation':'%s'}".formatted(value))).andExpect(jsonPath("$.relation").value(value));
+        }
+        for (String value : List.of("20s", "40s", "50s_plus")) {
+            patch(ME, account.access(), q("{'age_group':'%s'}".formatted(value))).andExpect(jsonPath("$.age_group").value(value));
+        }
+        // Taken away again with null. Without a relation the profile is no longer complete.
+        patch(ME, account.access(), q("{'age_group':null,'relation':null}")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.age_group").isEmpty()).andExpect(jsonPath("$.relation").isEmpty())
+                .andExpect(jsonPath("$.profile_completed").value(false));
+
+        // A nickname is 2 to 10 characters of Korean, English letters and digits, with single spaces inside.
+        for (String fine : List.of("도영", "Mom2", "열글자짜리닉네임이야", "a b c d e")) {
+            patch(ME, account.access(), q("{'nickname':'%s'}".formatted(fine))).andExpect(status().isOk());
+        }
+        for (String bad : List.of("'nickname':'가'", "'nickname':'열한글자짜리닉네임이야'", "'nickname':'도영!'", "'nickname':'도영  엄마'",
+                "'nickname':'ㅋㅋ'", "'nickname':'<b>hi</b>'", "'relation':'aunt'", "'relation':''", "'relation':1",
+                "'age_group':'60s'", "'age_group':30")) {
+            expectError(patch(ME, account.access(), q("{" + bad + "}")), 400, BAD_INPUT);
+        }
+        get(ME, account.access()).andExpect(jsonPath("$.nickname").value("a b c d e"));
+    }
+
+    @Test
     void profileReadUpdateAndClear() throws Exception {
         Session account = signUp(EMAIL);
-        get(ME, account.access()).andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(6))
+        get(ME, account.access()).andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(9))
                 .andExpect(jsonPath("$.id").value(account.userId())).andExpect(jsonPath("$.email").value(EMAIL))
                 .andExpect(jsonPath("$.phone").value("")).andExpect(jsonPath("$.name").value(""))
                 .andExpect(jsonPath("$.nickname").value("")).andExpect(jsonPath("$.active_child_id").isEmpty());
 
         patch(ME, account.access(), q("{'name':' 부모 ','nickname':'닉네임'}")).andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(5))
+                .andExpect(jsonPath("$.length()").value(8))
                 .andExpect(jsonPath("$.name").value("부모")).andExpect(jsonPath("$.nickname").value("닉네임"));
         patch(ME, account.access(), q("{'name':'보호자'}")).andExpect(jsonPath("$.nickname").value("닉네임"));
         get(ME, account.access()).andExpect(jsonPath("$.name").value("보호자"));

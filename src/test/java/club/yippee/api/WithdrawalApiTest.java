@@ -66,6 +66,7 @@ class WithdrawalApiTest extends ApiTestBase {
         Session member = memberWithHistory("parent@example.com");
         long pending = order(member, "pending", false);
 
+        patch(ME, member.access(), q("{'nickname':'도영 엄마','relation':'mother','age_group':'30s'}")).andExpect(status().isOk());
         delete(ME, member.access()).andExpect(status().isOk()).andExpect(jsonPath("$.message").isString());
 
         // Nothing opens the account any more.
@@ -76,10 +77,13 @@ class WithdrawalApiTest extends ApiTestBase {
                 400, "VALIDATION_ERROR");
 
         // The member's row is emptied, not removed.
-        var row = jdbc.sql("select email, name, nickname, phone, agreements, is_active, withdrawn_at, active_child_id"
+        var row = jdbc.sql("select email, name, nickname, relation, age_group, phone, agreements, is_active, withdrawn_at, active_child_id"
                 + " from users where id = ?").param(member.userId()).query().singleRow();
         assertThat(row.get("email")).isEqualTo("withdrawn-" + member.userId() + "@withdrawn.invalid");
         assertThat(row.get("name")).isEqualTo("");
+        assertThat(row.get("nickname")).isEqualTo("");
+        assertThat(row.get("relation")).isNull();
+        assertThat(row.get("age_group")).isNull();
         assertThat(row.get("agreements")).isEqualTo("{}");
         assertThat(row.get("is_active")).isEqualTo(false);
         assertThat(row.get("withdrawn_at")).isNotNull();

@@ -28,6 +28,10 @@ public class User {
     String name = "";
     String nickname = "";
     String phone = "";
+    /** Who the member is to the child: mother, father, grandparent or other. Null until told. */
+    String relation;
+    /** The member's own age group: 20s, 30s, 40s or 50s_plus. Null when not told; it is optional. */
+    String ageGroup;
     /** The consent object the client sent at signup, as JSON text. */
     String agreements;
     Long activeChildId;

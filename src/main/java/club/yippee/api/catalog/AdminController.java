@@ -59,6 +59,58 @@ public class AdminController {
         return ResponseEntity.status(201).body(Map.of("id", key.getKey().longValue(), "name", name));
     }
 
+    /** Every activity, off the catalogue too, newest first. ?is_public=true|false, ?category=, ?q= narrow it. */
+    @org.springframework.web.bind.annotation.GetMapping("/activities")
+    Map<String, Object> list(@RequestParam Map<String, String> params) {
+        java.util.Set<String> faults = new java.util.LinkedHashSet<>(params.keySet());
+        faults.removeAll(java.util.Set.of("is_public", "category", "q", "page", "page_size"));
+        String shown = params.get("is_public");
+        if (shown != null && !shown.equals("true") && !shown.equals("false")) {
+            faults.add("is_public");
+        }
+        String text = params.get("q");
+        if (text != null && (text.isBlank() || text.length() > 255)) {
+            faults.add("q");
+        }
+        Integer category = CatalogController.whole(params, "category", 1, Integer.MAX_VALUE, faults);
+        Integer page = CatalogController.whole(params, "page", 1, 1_000_000, faults);
+        Integer size = CatalogController.whole(params, "page_size", 1, 100, faults);
+        if (!faults.isEmpty()) {
+            throw ApiException.fields(faults);
+        }
+        return activities.adminSearch(shown == null ? null : Boolean.valueOf(shown), category == null ? null : category.longValue(),
+                text == null ? null : text.strip(), page == null ? 1 : page, size == null ? 20 : size);
+    }
+
+    /** One activity with every stored field, published or not. */
+    @org.springframework.web.bind.annotation.GetMapping("/activities/{id:[0-9]{1,18}}")
+    Map<String, Object> detail(@PathVariable Long id) {
+        return activities.adminDetail(id);
+    }
+
+    /** The cover or the original PDF (no member's code on it), whatever the activity's state. */
+    @org.springframework.web.bind.annotation.GetMapping("/activities/{id:[0-9]{1,18}}/files/{kind}")
+    ResponseEntity<org.springframework.core.io.Resource> file(@PathVariable Long id, @PathVariable String kind) throws IOException {
+        Activity activity = activities.find(id).orElseThrow(ApiException::notFound);
+        return sent("pdf".equals(kind) || "image".equals(kind) ? activities.file(activity, kind) : null);
+    }
+
+    /** One sample page, whatever the activity's state. */
+    @org.springframework.web.bind.annotation.GetMapping("/activities/{id:[0-9]{1,18}}/previews/{position:[1-9]}")
+    ResponseEntity<org.springframework.core.io.Resource> previewPage(@PathVariable Long id, @PathVariable int position) throws IOException {
+        return sent(activities.preview(activities.find(id).orElseThrow(ApiException::notFound), position));
+    }
+
+    // Never kept by a browser: these open for an admin's token only.
+    private static ResponseEntity<org.springframework.core.io.Resource> sent(org.springframework.core.io.Resource file) throws IOException {
+        if (file == null) {
+            throw ApiException.notFound();
+        }
+        return ResponseEntity.ok().header(org.springframework.http.HttpHeaders.CACHE_CONTROL, "private, no-store")
+                .contentType(CatalogController.TYPES.getOrDefault(Activities.extension(file), MediaType.APPLICATION_OCTET_STREAM))
+                .body(file);
+    }
+
     /** A form upload: the fields below plus the files "image" and "pdf". */
     @PostMapping(value = "/activities", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     ResponseEntity<Map<String, Object>> create(@RequestParam Map<String, String> form,
@@ -70,7 +122,7 @@ public class AdminController {
         Integer ageMin = number(form, "age_min_months", 0, MAX_MONTHS, faults);
         Integer ageMax = number(form, "age_max_months", 0, MAX_MONTHS, faults);
         String difficulty = form.get("difficulty");
-        if (!"easy".equals(difficulty) && !"hard".equals(difficulty)) {
+        if (difficulty == null || !Activities.DIFFICULTIES.contains(difficulty)) {
             faults.add("difficulty");
         }
         Integer durationMin = number(form, "duration_min", 1, MAX_MINUTES, faults);
@@ -179,7 +231,7 @@ public class AdminController {
         Integer ageMin = fields.has("age_min_months") ? fields.whole("age_min_months", 0, MAX_MONTHS) : null;
         Integer ageMax = fields.has("age_max_months") ? fields.whole("age_max_months", 0, MAX_MONTHS) : null;
         String difficulty = fields.has("difficulty") ? fields.string("difficulty") : null;
-        if (difficulty != null && !difficulty.equals("easy") && !difficulty.equals("hard")) {
+        if (difficulty != null && !Activities.DIFFICULTIES.contains(difficulty)) {
             fields.reject("difficulty");
         }
         Integer durationMin = fields.has("duration_min") ? fields.whole("duration_min", 1, MAX_MINUTES) : null;

@@ -41,6 +41,8 @@ public class Activities {
             "price_asc", Sort.by(Sort.Order.asc("price"), Sort.Order.asc("id")),
             "price_desc", Sort.by(Sort.Order.desc("price"), Sort.Order.asc("id")));
 
+    /** The three levels an activity can be marked with. */
+    static final java.util.Set<String> DIFFICULTIES = java.util.Set.of("easy", "normal", "hard");
     /** How long a 7-day pass lasts, counted from the moment its payment is settled. */
     public static final int RENTAL_DAYS = 7;
     /** How long a download link stays good. */
@@ -67,19 +69,25 @@ public class Activities {
                   String difficulty, Integer priceMin, Integer priceMax, String sort, int page, int pageSize) {
     }
 
+    // What the public search and the admin's list both narrow by: words in the title or description, and a category.
+    private static void narrow(List<Predicate> all, jakarta.persistence.criteria.Root<Activity> root,
+                               jakarta.persistence.criteria.CriteriaBuilder cb, String text, Long category) {
+        if (text != null) {
+            String pattern = "%" + text.toLowerCase(Locale.ROOT)
+                    .replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%";
+            all.add(cb.or(cb.like(cb.lower(root.get("title")), pattern, '\\'),
+                    cb.like(cb.lower(root.get("description")), pattern, '\\')));
+        }
+        if (category != null) {
+            all.add(cb.isMember(category, root.get("categoryIds")));
+        }
+    }
+
     Page<Activity> search(Search search) {
         Specification<Activity> filter = (root, query, cb) -> {
             List<Predicate> all = new ArrayList<>();
             all.add(cb.isTrue(root.get("published")));
-            if (search.text() != null) {
-                String pattern = "%" + search.text().toLowerCase(Locale.ROOT)
-                        .replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%";
-                all.add(cb.or(cb.like(cb.lower(root.get("title")), pattern, '\\'),
-                        cb.like(cb.lower(root.get("description")), pattern, '\\')));
-            }
-            if (search.category() != null) {
-                all.add(cb.isMember(search.category(), root.get("categoryIds")));
-            }
+            narrow(all, root, cb, search.text(), search.category());
             if (search.ageYears() != null) {
                 // The year of age as a span of months, overlapping the activity's recommended span.
                 int months = search.ageYears() * 12;
@@ -348,6 +356,46 @@ public class Activities {
         Files.createDirectories(target.getParent());
         Files.write(target, bytes);
         return name;
+    }
+
+    /**
+     * The admin's list: every activity, on the catalogue or off it, newest first.
+     * A null argument is "no filter".
+     */
+    @Transactional(readOnly = true)
+    public Map<String, Object> adminSearch(Boolean published, Long category, String text, int page, int pageSize) {
+        Specification<Activity> filter = (root, query, cb) -> {
+            List<Predicate> all = new ArrayList<>();
+            if (published != null) {
+                all.add(cb.equal(root.get("published"), published));
+            }
+            narrow(all, root, cb, text, category);
+            return cb.and(all.toArray(Predicate[]::new));
+        };
+        Page<Activity> found = repository.findAll(filter, PageRequest.of(page - 1, pageSize, ORDERS.get("latest")));
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("count", found.getTotalElements());
+        body.put("results", found.getContent().stream().map(this::adminView).toList());
+        return body;
+    }
+
+    /**
+     * One activity as the admin sees it, published or not. The public links to its files are shut
+     * while it is off the catalogue, so it also carries links that open for an admin's token alone.
+     */
+    @Transactional(readOnly = true)
+    public Map<String, Object> adminDetail(Long id) {
+        Activity activity = repository.findById(id).orElseThrow(ApiException::notFound);
+        Map<String, Object> body = adminView(activity);
+        body.put("created_at", activity.createdAt.toString());
+        body.put("updated_at", activity.updatedAt.toString());
+        String base = ServletUriComponentsBuilder.fromCurrentContextPath()
+                .path("/api/v1/admin/activities/{id}").buildAndExpand(id).toUriString();
+        body.put("admin_image", base + "/files/image");
+        body.put("admin_pdf", base + "/files/pdf");
+        body.put("admin_preview_urls", jdbc.sql("select position from activity_previews where activity_id = ? order by position")
+                .param(id).query(Integer.class).list().stream().map(position -> base + "/previews/" + position).toList());
+        return body;
     }
 
     private Map<String, Object> adminView(Activity activity) {

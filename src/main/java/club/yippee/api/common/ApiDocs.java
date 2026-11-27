@@ -34,7 +34,7 @@ class ApiDocs {
 
     // The text fields AdminController.create reads from its form: name, hint, and "*" where the server demands it.
     private static final String[][] ACTIVITY_FIELDS = {{"title", "", "*"}, {"description", "", "*"},
-            {"age_min_months", "개월", "*"}, {"age_max_months", "개월", "*"}, {"difficulty", "easy 또는 hard", "*"},
+            {"age_min_months", "개월", "*"}, {"age_max_months", "개월", "*"}, {"difficulty", "easy, normal 또는 hard", "*"},
             {"duration_min", "분", "*"}, {"duration_max", "분", "*"}, {"price", "원. 무료는 0", "*"},
             {"rental_price", "7일 이용권 가격. 비우면 영구 소장만 판매", ""}, {"is_public", "true 또는 false. 비우면 false", ""},
             {"categories", "카테고리 번호를 쉼표로 구분. 예: 1,2", "*"}};

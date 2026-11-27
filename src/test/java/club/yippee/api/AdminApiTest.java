@@ -3,6 +3,7 @@ package club.yippee.api;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -89,6 +90,70 @@ class AdminApiTest extends ApiTestBase {
         expectError(delete(ADMIN + "/activities/" + id + "/previews", member.access()), 403, "PERMISSION_DENIED");
         delete(ADMIN + "/activities/" + id + "/previews", admin.access()).andExpect(status().isOk());
         get(preview, null).andExpect(jsonPath("$.preview_urls.length()").value(0));
+    }
+
+    // The admin's own list and detail: an activity that is off the catalogue can be found, read and put back.
+    @Test
+    void anAdminFindsAndReadsActivitiesThatAreOffTheCatalogue() throws Exception {
+        Session admin = signUp("admin@example.com");
+        Session member = signUp("member@example.com");
+        Number nature = read(post(ADMIN + "/categories", admin.access(), q("{'name':'자연탐구'}")), "$.id");
+        Number art = read(post(ADMIN + "/categories", admin.access(), q("{'name':'미술'}")), "$.id");
+        long shown = ((Number) read(mvc.perform(upload(admin, PNG, PDF, "1500", nature.toString())), "$.id")).longValue();
+        long hidden = ((Number) read(mvc.perform(upload(admin, PNG, PDF, "0", art.toString())), "$.id")).longValue();
+        patch(ADMIN + "/activities/" + hidden, admin.access(), q("{'is_public':false,'title':'숨긴 활동지','difficulty':'normal'}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.difficulty").value("normal"));
+        mvc.perform(previews(admin, hidden, PNG)).andExpect(status().isOk());
+        String list = ADMIN + "/activities";
+
+        // Newest first, the hidden one included. The public catalogue still shows only the other.
+        get(list, admin.access()).andExpect(status().isOk()).andExpect(jsonPath("$.count").value(2))
+                .andExpect(jsonPath("$.results[0].id").value(hidden)).andExpect(jsonPath("$.results[0].is_public").value(false))
+                .andExpect(jsonPath("$.results[1].id").value(shown)).andExpect(jsonPath("$.results[1].is_public").value(true));
+        get("/api/v1/activities", null).andExpect(jsonPath("$.count").value(1));
+        get(list + "?is_public=false", admin.access()).andExpect(jsonPath("$.count").value(1))
+                .andExpect(jsonPath("$.results[0].id").value(hidden));
+        get(list + "?is_public=true", admin.access()).andExpect(jsonPath("$.results[0].id").value(shown));
+        get(list + "?q=숨긴", admin.access()).andExpect(jsonPath("$.count").value(1));
+        get(list + "?category=" + nature, admin.access()).andExpect(jsonPath("$.results[0].id").value(shown));
+        get(list + "?page=2&page_size=1", admin.access()).andExpect(jsonPath("$.count").value(2))
+                .andExpect(jsonPath("$.results.length()").value(1)).andExpect(jsonPath("$.results[0].id").value(shown));
+        for (String bad : new String[]{"?is_public=maybe", "?page=0", "?page_size=101", "?category=x", "?q=", "?sort=title"}) {
+            expectError(get(list + bad, admin.access()), 400, "VALIDATION_ERROR");
+        }
+        expectError(get(list, member.access()), 403, "PERMISSION_DENIED");
+        expectError(get(list, null), 401, "AUTHENTICATION_REQUIRED");
+
+        // The detail carries every stored field, and links to the files that work for an admin whatever the state.
+        ResultActions detail = get(list + "/" + hidden, admin.access()).andExpect(status().isOk())
+                .andExpect(jsonPath("$.title").value("숨긴 활동지")).andExpect(jsonPath("$.is_public").value(false))
+                .andExpect(jsonPath("$.difficulty").value("normal")).andExpect(jsonPath("$.price").value(0))
+                .andExpect(jsonPath("$.categories[0]").value(art.intValue()))
+                .andExpect(jsonPath("$.created_at").isString()).andExpect(jsonPath("$.updated_at").isString())
+                .andExpect(jsonPath("$.admin_preview_urls.length()").value(1));
+        String image = ((String) read(detail, "$.admin_image")).replace("http://localhost", "");
+        String pdf = ((String) read(detail, "$.admin_pdf")).replace("http://localhost", "");
+        String sample = ((String) read(detail, "$.admin_preview_urls[0]")).replace("http://localhost", "");
+        get(image, admin.access()).andExpect(status().isOk()).andExpect(content().bytes(PNG));
+        get(pdf, admin.access()).andExpect(status().isOk()).andExpect(content().bytes(PDF))
+                .andExpect(header().string("Cache-Control", "private, no-store"));
+        get(sample, admin.access()).andExpect(status().isOk()).andExpect(content().bytes(PNG));
+        // Nobody else gets them, and the public addresses of a hidden activity stay shut.
+        for (String address : new String[]{image, pdf, sample, list + "/" + hidden}) {
+            expectError(get(address, member.access()), 403, "PERMISSION_DENIED");
+            expectError(get(address, null), 401, "AUTHENTICATION_REQUIRED");
+        }
+        expectError(get("/api/v1/activities/" + hidden + "/files/image", null), 404, "NOT_FOUND");
+        expectError(get("/api/v1/activities/" + hidden + "/preview", null), 404, "NOT_FOUND");
+        expectError(get(list + "/999999", admin.access()), 404, "NOT_FOUND");
+        expectError(get(list + "/" + hidden + "/files/other", admin.access()), 404, "NOT_FOUND");
+        expectError(get(list + "/" + hidden + "/previews/2", admin.access()), 404, "NOT_FOUND");
+
+        // Put back on the catalogue, the customer sees it, with the middle difficulty searchable.
+        patch(ADMIN + "/activities/" + hidden, admin.access(), q("{'is_public':true}")).andExpect(status().isOk());
+        get("/api/v1/activities?difficulty=normal", null).andExpect(jsonPath("$.count").value(1))
+                .andExpect(jsonPath("$.results[0].id").value(hidden));
+        expectError(patch(ADMIN + "/activities/" + hidden, admin.access(), q("{'difficulty':'medium'}")), 400, "VALIDATION_ERROR");
     }
 
     @Test

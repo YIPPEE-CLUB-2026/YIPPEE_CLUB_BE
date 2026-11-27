@@ -62,7 +62,7 @@ public class Issuances {
     private static final String ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
     private static final String LINK = "download";
     private static final float SIZE = 10f;
-    private static final float MARGIN = 12f * 72f / 25.4f;   // 12 mm from the top and right edges
+    private static final float MARGIN = 6f * 72f / 25.4f;   // 6 mm from the bottom and left edges
 
     /** One issued copy: its row, whose it is, and the code on it. */
     public record Issued(long id, long userId, String code) {
@@ -221,9 +221,10 @@ public class Issuances {
     }
 
     /**
-     * Writes a copy of the PDF with "CODE: <code>" in the top right corner of every page, as the
+     * Writes a copy of the PDF with "CODE: <code>" in the bottom left corner of every page, as the
      * reader sees the page (a page stored turned is allowed for). The original file is only read.
-     * The corner must be empty in the sheet's design: nothing is erased to make room.
+     * That corner is the one our sheets leave empty (the top right holds the name box, the bottom
+     * right our mark); nothing is erased to make room.
      */
     static void stamp(File original, File copy, String code) throws IOException {
         try (PDDocument document = Loader.loadPDF(original, IOUtils.createTempFileOnlyStreamCache())) {
@@ -238,9 +239,10 @@ public class Issuances {
                 int turn = Math.floorMod(page.getRotation(), 360);
                 boolean sideways = turn == 90 || turn == 270;
                 // The corner as the reader sees it, measured from the page's bottom left as seen.
-                float x = (sideways ? box.getHeight() : box.getWidth()) - MARGIN - width;
-                float y = (sideways ? box.getWidth() : box.getHeight()) - MARGIN - SIZE;
-                if (x < MARGIN || y < MARGIN) {
+                float x = MARGIN;
+                float y = MARGIN;
+                if (x + width + MARGIN > (sideways ? box.getHeight() : box.getWidth())
+                        || y + SIZE + MARGIN > (sideways ? box.getWidth() : box.getHeight())) {
                     throw new IOException("a page too small for the code");
                 }
                 // The same point on the page as it is stored, before the viewer turns it.

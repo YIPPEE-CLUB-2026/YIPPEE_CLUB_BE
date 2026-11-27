@@ -110,6 +110,9 @@ class OrderApiTest extends ApiTestBase {
                 .andExpect(jsonPath("$.payment_session_token").isEmpty());
         assertThat(entitlements(buyer)).isEqualTo(1);
         verify(gateway, never()).confirm(anyString(), anyString(), anyLong());
+        // A free order is complete the moment it is made, and says that no payment company was involved.
+        get(ORDERS, buyer.access()).andExpect(jsonPath("$.results[0].payment_method").value("free"))
+                .andExpect(jsonPath("$.results[0].paid_at").isString());
         get("/api/v1/purchases/activities", buyer.access()).andExpect(jsonPath("$.count").value(1))
                 .andExpect(jsonPath("$.results[0].id").value(free));
         // Nothing is paid, so there is no refund notice to agree to.
@@ -137,14 +140,33 @@ class OrderApiTest extends ApiTestBase {
         get("/api/v1/cart", buyer.access()).andExpect(jsonPath("$.items").isEmpty());
         expectError(post("/api/v1/cart/items", buyer.access(), "{\"activity_id\":" + sheet + "}"), 409, "ALREADY_PURCHASED");
         expectError(order(buyer, sheet), 409, "ALREADY_PURCHASED");
-        get(ORDERS + "/" + order[0], buyer.access()).andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(5))
+        // An order still to be paid has a date of its making, and neither a payment date nor a way of paying.
+        String[] waiting = pending(other, second);
+        get(ORDERS + "/" + waiting[0], other.access()).andExpect(jsonPath("$.created_at").isString())
+                .andExpect(jsonPath("$.paid_at").isEmpty()).andExpect(jsonPath("$.refunded_at").isEmpty())
+                .andExpect(jsonPath("$.payment_method").isEmpty());
+        get(ORDERS + "/" + order[0], buyer.access()).andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(9))
+                .andExpect(jsonPath("$.created_at").value(org.hamcrest.Matchers.endsWith("Z")))
+                .andExpect(jsonPath("$.paid_at").value(org.hamcrest.Matchers.endsWith("Z")))
+                .andExpect(jsonPath("$.refunded_at").isEmpty())
+                .andExpect(jsonPath("$.payment_method").value("toss"))
                 .andExpect(jsonPath("$.refund_request").isEmpty())
                 .andExpect(jsonPath("$.status").value("paid")).andExpect(jsonPath("$.total_amount").value(2890))
                 .andExpect(jsonPath("$.items.length()").value(2)).andExpect(jsonPath("$.items[0].price").value(1900));
         get(ORDERS + "/" + order[0] + "/receipt", buyer.access())
                 .andExpect(jsonPath("$.receipt_url").value("https://receipt.example/1"));
+        // The list can start at a Korean day, counted from when each order was made.
+        jdbc.sql("update orders set created_at = ? where id = ?")
+                .params(java.time.LocalDateTime.parse("2026-11-24T14:59:59"), Long.valueOf(order[0])).update();
+        get(ORDERS + "?since=2026-11-24", buyer.access()).andExpect(jsonPath("$.count").value(1));
+        get(ORDERS + "?since=2026-11-25", buyer.access()).andExpect(jsonPath("$.count").value(0));
+        for (String bad : new String[]{"?since=2026-11", "?since=2026-02-30", "?since=yesterday", "?until=2026-11-25"}) {
+            expectError(get(ORDERS + bad, buyer.access()), 400, "VALIDATION_ERROR");
+        }
         get(ORDERS, buyer.access()).andExpect(jsonPath("$.count").value(1))
                 .andExpect(jsonPath("$.results[0].status").value("paid"))
+                .andExpect(jsonPath("$.results[0].created_at").isString()).andExpect(jsonPath("$.results[0].paid_at").isString())
+                .andExpect(jsonPath("$.results[0].payment_method").value("toss"))
                 .andExpect(jsonPath("$.results[0].payment_session_token").isEmpty());
         get("/api/v1/purchases/activities", buyer.access()).andExpect(jsonPath("$.count").value(2));
     }
