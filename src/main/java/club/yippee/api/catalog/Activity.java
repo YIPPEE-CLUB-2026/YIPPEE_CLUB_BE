@@ -37,7 +37,7 @@ public class Activity {
     String description;
     int ageMinMonths;
     int ageMaxMonths;
-    /** "easy" or "hard". */
+    /** "easy", "normal" or "hard". */
     String difficulty;
     int durationMin;
     int durationMax;

@@ -45,11 +45,37 @@ public class ProfileController {
 
     @PatchMapping
     Map<String, Object> update(@AuthenticationPrincipal Long userId, @RequestBody(required = false) Object body) {
-        Fields fields = Fields.strict(body, "name", "nickname");
+        Fields fields = Fields.strict(body, "name", "nickname", "relation", "age_group");
         String name = optionalText(fields, "name", 100);
-        String nickname = optionalText(fields, "nickname", 50);
+        String nickname = optionalText(fields, "nickname", 10);
+        if (nickname != null && !nickname.isEmpty() && !NICKNAME.matcher(nickname).matches()) {
+            fields.reject("nickname");
+        }
+        String relation = optionalChoice(fields, "relation", RELATIONS);
+        String ageGroup = optionalChoice(fields, "age_group", AGE_GROUPS);
         fields.check();
-        return accounts.updateProfile(userId, name, nickname);
+        return accounts.updateProfile(userId, name, nickname, relation, ageGroup);
+    }
+
+    /** 2 to 10 characters of Korean syllables, English letters and digits; single spaces may stand inside ("도영 엄마"). */
+    private static final java.util.regex.Pattern NICKNAME =
+            java.util.regex.Pattern.compile("(?=.{2,10}$)[가-힣A-Za-z0-9]+( [가-힣A-Za-z0-9]+)*");
+    private static final java.util.Set<String> RELATIONS = java.util.Set.of("mother", "father", "grandparent", "other");
+    private static final java.util.Set<String> AGE_GROUPS = java.util.Set.of("20s", "30s", "40s", "50s_plus");
+
+    // Left out: null, meaning "keep". Sent as JSON null: "", meaning "clear". Otherwise one of the known values.
+    private static String optionalChoice(Fields fields, String name, java.util.Set<String> known) {
+        if (!fields.has(name)) {
+            return null;
+        }
+        if (fields.isNull(name)) {
+            return "";
+        }
+        String value = fields.string(name);
+        if (value == null || !known.contains(value)) {
+            fields.reject(name);
+        }
+        return value;
     }
 
     // Left out: null, meaning "keep". Sent as JSON null: "", meaning "clear".

@@ -105,6 +105,24 @@ class IssuanceApiTest extends ApiTestBase {
                 reader.setEndPage(page);
                 assertThat(reader.getText(document)).contains("CODE: " + code).doesNotContain("buyer@example.com");
             }
+            // The code sits in the bottom left corner as the reader sees the page, 6 mm from both
+            // edges, on the upright page and on the one stored turned alike.
+            java.util.List<float[]> starts = new java.util.ArrayList<>();
+            PDFTextStripper where = new PDFTextStripper() {
+                @Override
+                protected void writeString(String text, java.util.List<org.apache.pdfbox.text.TextPosition> glyphs) {
+                    org.apache.pdfbox.text.TextPosition first = glyphs.get(0);
+                    // Measured up from the bottom of the page as it is seen: a turned page is as tall as it is stored wide.
+                    float seenHeight = first.getRotation() % 180 == 0 ? first.getPageHeight() : first.getPageWidth();
+                    starts.add(new float[]{first.getXDirAdj(), seenHeight - first.getYDirAdj()});
+                }
+            };
+            where.getText(document);
+            assertThat(starts).hasSize(2);
+            for (float[] start : starts) {
+                assertThat(start[0]).isCloseTo(17f, org.assertj.core.data.Offset.offset(1f));
+                assertThat(start[1]).isCloseTo(17f, org.assertj.core.data.Offset.offset(1f));
+            }
             // Nothing in the file's own description names the member either.
             assertThat(document.getDocumentInformation().getAuthor()).isNull();
         }

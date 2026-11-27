@@ -28,7 +28,7 @@ public class CatalogController {
 
     private static final Pattern WHOLE = Pattern.compile("[0-9]{1,9}");
     private static final Pattern RANGE = Pattern.compile("[0-9]{1,5}-[0-9]{1,5}");
-    private static final Map<String, MediaType> TYPES = Map.of("pdf", MediaType.APPLICATION_PDF,
+    static final Map<String, MediaType> TYPES = Map.of("pdf", MediaType.APPLICATION_PDF,
             "png", MediaType.IMAGE_PNG, "jpg", MediaType.IMAGE_JPEG, "jpeg", MediaType.IMAGE_JPEG,
             "webp", MediaType.parseMediaType("image/webp"));
 
@@ -171,7 +171,7 @@ public class CatalogController {
             }
         }
         String difficulty = params.get("difficulty");
-        if (difficulty != null && !difficulty.equals("easy") && !difficulty.equals("hard")) {
+        if (difficulty != null && !Activities.DIFFICULTIES.contains(difficulty)) {
             faults.add("difficulty");
         }
         Integer priceMin = whole(params, "price_min", 0, Integer.MAX_VALUE, faults);

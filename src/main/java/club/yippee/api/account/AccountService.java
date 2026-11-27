@@ -240,15 +240,21 @@ public class AccountService {
         return body;
     }
 
-    /** A null argument leaves that field as it is. */
+    /** A null argument leaves that field as it is. An empty one clears it. */
     @Transactional
-    public Map<String, Object> updateProfile(Long userId, String name, String nickname) {
+    public Map<String, Object> updateProfile(Long userId, String name, String nickname, String relation, String ageGroup) {
         User user = users.lockById(userId).filter(found -> found.active).orElseThrow(ApiException::notFound);
         if (name != null) {
             user.name = name;
         }
         if (nickname != null) {
             user.nickname = nickname;
+        }
+        if (relation != null) {
+            user.relation = relation.isEmpty() ? null : relation;
+        }
+        if (ageGroup != null) {
+            user.ageGroup = ageGroup.isEmpty() ? null : ageGroup;
         }
         return view(user);
     }
@@ -303,6 +309,8 @@ public class AccountService {
         user.name = "";
         user.nickname = "";
         user.phone = "";
+        user.relation = null;
+        user.ageGroup = null;
         user.agreements = "{}";
         user.activeChildId = null;
         user.passwordHash = encoder.encode(Digests.randomToken());
@@ -428,6 +436,11 @@ public class AccountService {
         body.put("phone", user.phone);
         body.put("name", user.name);
         body.put("nickname", user.nickname);
+        body.put("relation", user.relation);
+        body.put("age_group", user.ageGroup);
+        // False until the parent-info screen was filled in (a nickname and a relation; the age group
+        // is optional). An account exists before that screen, so the app sends such a member back to it.
+        body.put("profile_completed", !user.nickname.isEmpty() && user.relation != null);
         return body;
     }
 

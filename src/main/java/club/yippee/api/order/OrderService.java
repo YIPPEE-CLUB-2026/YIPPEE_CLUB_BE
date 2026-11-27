@@ -640,12 +640,31 @@ public class OrderService {
     }
 
     @Transactional(readOnly = true)
-    public Map<String, Object> list(Long userId, int page, int pageSize) {
-        Page<Order> found = orders.findByUserIdOrderByIdDesc(userId, PageRequest.of(page - 1, pageSize));
+    public Map<String, Object> list(Long userId, Instant since, int page, int pageSize) {
+        PageRequest request = PageRequest.of(page - 1, pageSize);
+        // since: only the orders made at or after that moment. Null: all of them.
+        Page<Order> found = since == null ? orders.findByUserIdOrderByIdDesc(userId, request)
+                : orders.findByUserIdAndCreatedAtGreaterThanEqualOrderByIdDesc(userId, since, request);
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("count", found.getTotalElements());
-        body.put("results", found.getContent().stream().map(OrderService::summary).toList());
+        body.put("results", found.getContent().stream().map(order -> {
+            Map<String, Object> row = summary(order);
+            addDates(row, order);
+            return row;
+        }).toList());
         return body;
+    }
+
+    // When the order was made, paid and refunded (null where that has not happened), and how it was paid.
+    private static void addDates(Map<String, Object> body, Order order) {
+        body.put("created_at", order.createdAt.toString());
+        body.put("paid_at", order.paidAt == null ? null : order.paidAt.toString());
+        body.put("refunded_at", order.refundedAt == null ? null : order.refundedAt.toString());
+        // "free": nothing to pay, complete when made. "toss": paid through the payment company.
+        // Null while nothing was paid.
+        // shortcut: which card or wallet was used is not stored; the receipt (receipt_url) shows it.
+        // Store the payment company's "method" once a real payment has been seen through.
+        body.put("payment_method", order.paidAt == null ? null : order.amount == 0 ? "free" : "toss");
     }
 
     @Transactional(readOnly = true)
@@ -665,6 +684,7 @@ public class OrderService {
         body.put("status", order.status);
         body.put("items", items);
         body.put("total_amount", order.amount);
+        addDates(body, order);
         // The buyer's latest refund request, with the admin's answer once there is one. Null if none.
         body.put("refund_request", jdbc.sql("select status, reason, admin_note from refund_requests"
                         + " where order_id = ? order by id desc limit 1").param(order.id)

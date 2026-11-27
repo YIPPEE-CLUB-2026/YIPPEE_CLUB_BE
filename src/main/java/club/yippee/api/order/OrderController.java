@@ -77,8 +77,19 @@ public class OrderController {
 
     @GetMapping("/api/v1/orders")
     Map<String, Object> list(@AuthenticationPrincipal Long userId, @RequestParam Map<String, String> params) {
-        int[] page = page(params);
-        return orders.list(userId, page[0], page[1]);
+        // ?since=2026-08-27: the orders made on that Korean day or later ("the last three months").
+        java.util.Map<String, String> rest = new java.util.HashMap<>(params);
+        String since = rest.remove("since");
+        java.time.Instant from = null;
+        if (since != null) {
+            try {
+                from = java.time.LocalDate.parse(since).atStartOfDay(java.time.ZoneId.of("Asia/Seoul")).toInstant();
+            } catch (java.time.DateTimeException notADay) {
+                throw ApiException.field("since");
+            }
+        }
+        int[] page = page(rest);
+        return orders.list(userId, from, page[0], page[1]);
     }
 
     @GetMapping("/api/v1/orders/{id:[0-9]+}")
